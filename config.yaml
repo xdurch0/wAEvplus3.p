@@ -1,0 +1,13 @@
+path:
+  raw_dir: data_raw/LibriSpeech
+  root_dir: preprocessed
+  csv: ${path.root_dir}/corpus.csv
+  array_dir: ${path.root_dir}/raw_np
+  vocab: ${path.root_dir}/vocab.txt
+
+features:
+  mel_freqs: 128
+  window_size: 512
+  hop_length: 128
+  normalize: False
+  resample_rate: 0
