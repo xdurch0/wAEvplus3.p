@@ -1,9 +1,14 @@
-def make_vocab(csv_path, out_path):
+from typing import Tuple, Dict
+
+def make_vocab(csv_path: str,
+               out_path: str):
     """Create a human-readable character-index mapping for a given corpus.
+
     Parameters:
         csv_path: Path to the corpus csv (see e.g. w2l_inputs for a more
                   detailed description of how this should look).
         out_path: Path to store the vocabulary to.
+
     """
     with open(csv_path, mode="r") as corpus:
         lines_split = [line.strip().split(",") for line in corpus]
@@ -18,15 +23,17 @@ def make_vocab(csv_path, out_path):
                                                         out_path))
 
 
-def parse_vocab(vocab_path):
+def parse_vocab(vocab_path: str) -> Tuple[Dict[str, int], Dict[int, str]]:
     """Turn a human-readable character-index mapping into python dictionaries.
+
     Parameters:
         vocab_path: Path to vocabulary file.
+
     Returns:
         Python dictionaries mapping character -> index as well as
         index -> character.
-    """
 
+    """
     def process_line(line):
         ch, ind = line.rstrip().split(",")
         return ch, int(ind)

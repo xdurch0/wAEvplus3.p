@@ -1,4 +1,5 @@
 import os
+from typing import Optional
 
 import hydra
 import librosa
@@ -6,9 +7,10 @@ import numpy as np
 from omegaconf import DictConfig
 
 from w2l.utils.vocab import make_vocab
+w
 
-
-def make_corpus_csv(base_path, out_path):
+def make_corpus_csv(base_path: str,
+                    out_path: str):
     """Create a csv containing corpus info from a given directory.
 
     This will scan all subfolders recursively. For any folder that has files, it
@@ -75,16 +77,18 @@ def make_corpus_csv(base_path, out_path):
                     corpus_csv.write(",".join([fid, fpath, t, subset]) + "\n")
 
 
-def preprocess_audio(csv_path, corpus_path, array_dir, resample_rate=None):
+def preprocess_audio(csv_path: str,
+                     corpus_path: str,
+                     array_dir: str,
+                     resample_rate: Optional[int] = None):
     """Preprocess many audio files with requested parameters.
 
     Parameters:
         csv_path: Path to corpus csv.
-        corpus_path: Path to corpus, e.g. /data/LibriSpeech or
-                     /data/corpora/German.
+        corpus_path: Path to corpus.
         array_dir: Path to directory where all the processed arrays should be
                    stored in.
-        resample_rate: int. Hz to resample data to. If not given, no resampling
+        resample_rate: Hz to resample data to. If not given, no resampling
                        is performed and any sample rate != 16000 leads to a
                        crash.
 
@@ -92,14 +96,14 @@ def preprocess_audio(csv_path, corpus_path, array_dir, resample_rate=None):
     os.mkdir(array_dir)
     with open(csv_path) as corpus_csv:
         for n, line in enumerate(corpus_csv, start=1):
-            fid, fpath, _, subset = line.strip().split(",")
-            path = os.path.join(corpus_path, fpath)
-            audio, sr = librosa.load(path, sr=reswample_rate)
+            file_id, file_path, _, subset = line.strip().split(",")
+            path = os.path.join(corpus_path, file_path)
+            audio, sr = librosa.load(path, sr=resample_rate)
             if sr != 16000:
                 raise ValueError("Sampling rate != 16000 found in "
                                  "{}!".format(path))
 
-            np.save(os.path.join(array_dir, fid + ".npy"),
+            np.save(os.path.join(array_dir, file_id + ".npy"),
                     audio.astype(np.float32))
             if not n % 1000:
                 print("Processed {}...".format(n))
@@ -117,6 +121,9 @@ def main(config: DictConfig):
 
         """
     want_overwrite = False
+
+    if not os.path.isdir(config.path.root_dir):
+        os.mkdir(config.path.root_dir)
 
     if not os.path.exists(config.path.csv):
         print("The requested corpus csv {} does not seem to exist. "

@@ -1,6 +1,6 @@
 path:
-  raw_dir: data_raw/LibriSpeech
-  root_dir: preprocessed
+  raw_dir: /project/jens/wAEvplus3.p/data_raw/LibriSpeech
+  root_dir: /project/jens/wAEvplus3.p/preprocessed
   csv: ${path.root_dir}/corpus.csv
   array_dir: ${path.root_dir}/raw_np
   vocab: ${path.root_dir}/vocab.txt
@@ -11,3 +11,7 @@ features:
   hop_length: 128
   normalize: False
   resample_rate: 0
+  sample_rate: 16000
+
+training:
+  batch_size: 16
