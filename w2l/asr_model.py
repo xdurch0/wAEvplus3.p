@@ -1,9 +1,14 @@
+from typing import Dict, Union
+
 import librosa
 import tensorflow as tf
+from omegaconf import DictConfig
+
 tfkl = tf.keras.layers
 
 
-def dense_to_sparse(dense_tensor, sparse_val=-1):
+def dense_to_sparse(dense_tensor: tf.Tensor,
+                    sparse_val: int = -1) -> tf.SparseTensor:
     """Inverse of tf.sparse_to_dense.
     Parameters:
         dense_tensor: The dense tensor. Duh.
@@ -20,7 +25,7 @@ def dense_to_sparse(dense_tensor, sparse_val=-1):
     return tf.SparseTensor(sparse_inds, sparse_vals, dense_shape)
 
 
-def inverse_softplus(x):
+def inverse_softplus(x: Union[float, tf.Tensor]) -> tf.Tensor:
     return tf.math.log(tf.exp(x) - 1.)
 
 
@@ -33,7 +38,7 @@ class LogMel(tfkl.Layer):
                  hop_len: int,
                  sr: int,
                  pad: bool = True,
-                 compression: float = 1e-8,
+                 compression: float = 1e-6,
                  **kwargs):
         """Prepare variables for conversion.
         Parameters:
@@ -64,7 +69,9 @@ class LogMel(tfkl.Layer):
             dtype=tf.float32,
             name=self.name + "_compression")
 
-    def call(self, inputs: tf.Tensor, **kwargs) -> tf.Tensor:
+    def call(self,
+             inputs: tf.Tensor,
+             **kwargs) -> tf.Tensor:
         """Apply the layer.
         Parameters:
             inputs: Audio. Note that we assume a channel axis (size 1) even
@@ -88,15 +95,18 @@ class LogMel(tfkl.Layer):
 
 
 class W2L(tf.keras.Model):
-    def __init__(self, inputs, outputs):
+    def __init__(self,
+                 inputs: tf.Tensor,
+                 outputs: tf.Tensor):
         super().__init__(inputs, outputs)
         self.loss_tracker = tf.metrics.Mean(name="loss")
 
-    def train_step(self, data: tuple) -> dict:
+    def train_step(self,
+                   data: tuple) -> Dict[str, tf.Tensor]:
         inputs, targets = data
         audio = inputs["audio"]
         audio_length = inputs["audio_length"]
-        transcriptions = targets["transcriptions"]
+        transcriptions = targets["transcription"]
 
         with tf.GradientTape() as tape:
             logits = self(audio, training=True)
@@ -120,27 +130,52 @@ class W2L(tf.keras.Model):
         grads = tape.gradient(ctc_loss, self.trainable_variables)
         self.optimizer.apply_gradients(zip(grads, self.trainable_variables))
 
-        # TODO we do not use self.compiled_loss, check how to do this instead
-        # self.compiled_metrics.update_state(labels, logits)
         self.loss_tracker.update_state(ctc_loss)
         return {"loss": self.loss_tracker.result()}
+
+    def test_step(self,
+                  data: tuple) -> Dict[str, tf.Tensor]:
+        inputs, targets = data
+        audio = inputs["audio"]
+        audio_length = inputs["audio_length"]
+        transcriptions = targets["transcription"]
+        transcription_length = targets["transcription_length"]
+
+        logits = self(audio, training=True)
+        # after this we need logits in shape time x batch_size x vocab_size
+        logits_time_major = tf.transpose(logits, [1, 0, 2])
+
+        audio_length = tf.cast(audio_length / 2, tf.int32)
+
+        ctc_loss = tf.reduce_mean(tf.nn.ctc_loss(
+            labels=transcriptions,
+            logits=logits_time_major,
+            label_length=transcription_length,
+            logit_length=audio_length,
+            logits_time_major=True,
+            blank_index=0))
+
+        self.loss_tracker.update_state(ctc_loss)
+        return {"val_loss": self.loss_tracker.result()}
 
     @property
     def metrics(self):
         return [self.loss_tracker]
 
 
-def build_w2l_model(vocab_size, config):
+def build_w2l_model(vocab_size: int,
+                    config: DictConfig) -> W2L:
     wave_input = tf.keras.Input((None, 1))
 
-    layer_params = [(256, 48, 2)] + [(256, 7, 1)]*8 + [(2048, 32, 1), (2048, 1, 1)]
+    layer_params = [(256, 48, 2)] + [(256, 7, 1)]*8 + [(2048, 32, 1),
+                                                       (2048, 1, 1)]
 
     x = LogMel(config.features.mel_freqs, config.features.window_size,
                config.features.hop_length, config.features.sample_rate,
                trainable=False)(wave_input)
     for n_filters, width, stride in layer_params:
-        x = tfkl.Conv1D(n_filters, width, stride=stride, padding="same")(x)
-        x = tfkl.BatchNormalization(x)
+        x = tfkl.Conv1D(n_filters, width, strides=stride, padding="same")(x)
+        x = tfkl.BatchNormalization()(x)
         x = tfkl.ReLU()(x)
     logits = tfkl.Conv1D(vocab_size + 1, 1)(x)
 

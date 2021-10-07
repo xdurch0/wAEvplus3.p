@@ -4,6 +4,7 @@ path:
   csv: ${path.root_dir}/corpus.csv
   array_dir: ${path.root_dir}/raw_np
   vocab: ${path.root_dir}/vocab.txt
+  model: ${path.root_dir}/models/best.h5
 
 features:
   mel_freqs: 128
