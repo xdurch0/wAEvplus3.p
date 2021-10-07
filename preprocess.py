@@ -7,7 +7,7 @@ import numpy as np
 from omegaconf import DictConfig
 
 from w2l.utils.vocab import make_vocab
-w
+
 
 def make_corpus_csv(base_path: str,
                     out_path: str):

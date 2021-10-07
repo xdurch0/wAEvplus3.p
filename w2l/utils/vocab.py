@@ -1,5 +1,6 @@
 from typing import Tuple, Dict
 
+
 def make_vocab(csv_path: str,
                out_path: str):
     """Create a human-readable character-index mapping for a given corpus.
@@ -12,9 +13,9 @@ def make_vocab(csv_path: str,
     """
     with open(csv_path, mode="r") as corpus:
         lines_split = [line.strip().split(",") for line in corpus]
-    transcrs = [line[2] for line in lines_split]
+    transcriptions = [line[2] for line in lines_split]
 
-    char_set = sorted(set("".join(transcrs)))
+    char_set = sorted(set("".join(transcriptions)))
 
     with open(out_path, mode="w") as vocab_file:
         for ind, char in enumerate(char_set, start=1):

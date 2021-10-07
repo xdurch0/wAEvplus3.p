@@ -1,16 +1,16 @@
 import os
-from typing import Iterable, Dict
+from typing import Iterable, Dict, Tuple
 
 import numpy as np
 import tensorflow as tf
 from omegaconf import DictConfig
 
 
-def w2l_input_fn_npy(config: DictConfig,
-                     which_sets: Iterable[str],
-                     train: bool,
-                     vocab: Dict[str, int],
-                     normalize) -> tf.data.Dataset:
+def w2l_dataset_npy(config: DictConfig,
+                    which_sets: Iterable[str],
+                    train: bool,
+                    vocab: Dict[str, int],
+                    normalize) -> tf.data.Dataset:
     """Builds a TF dataset for the preprocessed data.
 
     Parameters:
@@ -46,7 +46,7 @@ def w2l_input_fn_npy(config: DictConfig,
     files = [os.path.join(config.path.array_dir, fid + ".npy") for fid in ids]
 
     def _to_arrays(fname, trans):
-        return _pyfunc_load_arrays_map_transcriptions(
+        return load_arrays_map_transcriptions(
             fname, trans, vocab, normalize)
 
     def gen():  # dummy to be able to use from_generator
@@ -55,8 +55,8 @@ def w2l_input_fn_npy(config: DictConfig,
             yield file_name.encode("utf-8"), transcr.encode("utf-8")
 
     data = tf.data.Dataset.from_generator(
-        gen, output_signature=(tf.TensorSpec((None,), dtype=tf.string),
-                               tf.TensorSpec((None,), dtype=tf.string)))
+        gen, output_signature=(tf.TensorSpec((), dtype=tf.string),
+                               tf.TensorSpec((), dtype=tf.string)))
 
     if train:
         # this basically shuffles the full dataset (~256k)
@@ -83,19 +83,22 @@ def w2l_input_fn_npy(config: DictConfig,
     return data
 
 
-def _pyfunc_load_arrays_map_transcriptions(file_name, trans, vocab, normalize):
+def load_arrays_map_transcriptions(file_name: bytes,
+                                   trans: bytes,
+                                   vocab: Dict[str, int],
+                                   normalize: bool) -> Tuple[np.ndarray, int,
+                                                             np.ndarray, int]:
     """Mapping function to go from file names to numpy arrays.
 
     Goes from file_id, transcriptions to a tuple np_array, coded_transcriptions
     (integers).
-    NOTE: Files are assumed to be stored channels_first. If this is not the
-          case, this will cause trouble down the line!!
+
     Parameters:
         file_name: Path built from ID taken from data csv, should match npy
                    file names. Expected to be utf-8 encoded as bytes.
         trans: Transcription. Also utf-8 bytes.
-        vocab: Dictionary mapping characters to integers.
-        normalize: Bool; if True, normalize the array to mean 0, std 1.
+        vocab: Mapping of characters to integers.
+        normalize: If True, normalize the array to peak amplitude 1.
 
     Returns:
         Tuple of 2D numpy array (seq_len x 1), scalar,
@@ -109,7 +112,7 @@ def _pyfunc_load_arrays_map_transcriptions(file_name, trans, vocab, normalize):
     transcription_length = np.int32(len(trans_mapped))
 
     if normalize:
-        array = (array - np.mean(array)) / np.std(array)
+        array /= np.max(abs(array))
 
     return_vals = (array[:, None].astype(np.float32), audio_length,
                    trans_mapped, transcription_length)
@@ -117,7 +120,11 @@ def _pyfunc_load_arrays_map_transcriptions(file_name, trans, vocab, normalize):
     return return_vals
 
 
-def pack_inputs_in_dict(audio, length, trans, trans_length):
+def pack_inputs_in_dict(audio: tf.Tensor,
+                        length: tf.Tensor,
+                        trans: tf.Tensor,
+                        trans_length: tf.Tensor) -> Tuple[Dict[str, tf.Tensor],
+                                                          Dict[str, tf.Tensor]]:
     """For estimator interface (only allows one input -> pack into dict)."""
-    return ({"audio": audio, "length": length},
-            {"transcription": trans, "length": trans_length})
+    return ({"audio": audio, "audio_length": length},
+            {"transcription": trans, "transcription_length": trans_length})

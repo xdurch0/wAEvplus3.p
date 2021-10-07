@@ -3,6 +3,23 @@ import tensorflow as tf
 tfkl = tf.keras.layers
 
 
+def dense_to_sparse(dense_tensor, sparse_val=-1):
+    """Inverse of tf.sparse_to_dense.
+    Parameters:
+        dense_tensor: The dense tensor. Duh.
+        sparse_val: The value to "ignore": Occurrences of this value in the
+                    dense tensor will not be represented in the sparse tensor.
+                    NOTE: When/if later restoring this to a dense tensor, you
+                    will probably want to choose this as the default value.
+    Returns:
+        SparseTensor equivalent to the dense input.
+    """
+    sparse_inds = tf.where(tf.not_equal(dense_tensor, sparse_val))
+    sparse_vals = tf.gather_nd(dense_tensor, sparse_inds)
+    dense_shape = tf.shape(dense_tensor, out_type=tf.int64)
+    return tf.SparseTensor(sparse_inds, sparse_vals, dense_shape)
+
+
 def inverse_softplus(x):
     return tf.math.log(tf.exp(x) - 1.)
 
@@ -71,48 +88,46 @@ class LogMel(tfkl.Layer):
 
 
 class W2L(tf.keras.Model):
+    def __init__(self, inputs, outputs):
+        super().__init__(inputs, outputs)
+        self.loss_tracker = tf.metrics.Mean(name="loss")
+
     def train_step(self, data: tuple) -> dict:
-        audio, transcriptions = data
+        inputs, targets = data
+        audio = inputs["audio"]
+        audio_length = inputs["audio_length"]
+        transcriptions = targets["transcriptions"]
+
         with tf.GradientTape() as tape:
             logits = self(audio, training=True)
             # after this we need logits in shape time x batch_size x vocab_size
-            if self.cf:  # bs x v x t -> t x bs x v
-                logits_tm = tf.transpose(logits, [2, 0, 1],
-                                         name="logits_time_major")
-            else:  # channels last: bs x t x v -> t x bs x v
-                logits_tm = tf.transpose(logits, [1, 0, 2],
-                                         name="logits_time_major")
+            logits_time_major = tf.transpose(logits, [1, 0, 2])
 
             audio_length = tf.cast(audio_length / 2, tf.int32)
 
-            if False:  # on_gpu:  # this seems to be slow so we don't use it
-                ctc_loss = tf.reduce_mean(tf.nn.ctc_loss(
-                    labels=transcrs, logits=logits_tm,
-                    label_length=transcr_length,
-                    logit_length=audio_length, logits_time_major=True,
-                    blank_index=0), name="avg_loss")
-            else:
-                transcrs_sparse = dense_to_sparse(transcrs, sparse_val=-1)
-                ctc_loss = tf.reduce_mean(tf.nn.ctc_loss(
-                    labels=transcrs_sparse, logits=logits_tm, label_length=None,
-                    logit_length=audio_length, logits_time_major=True,
-                    blank_index=0), name="avg_loss")
+            transcriptions_sparse = dense_to_sparse(transcriptions,
+                                                    sparse_val=-1)
+            # note this is the "CPU version" which may be slower, but earlier
+            # attempts at using the GPU version resulted in catastrophe...
+            ctc_loss = tf.reduce_mean(tf.nn.ctc_loss(
+                labels=transcriptions_sparse,
+                logits=logits_time_major,
+                label_length=None,
+                logit_length=audio_length,
+                logits_time_major=True,
+                blank_index=0))
 
-            if self.regularizer_coeff:
-                avg_reg_loss = tf.math.add_n(self.model.losses) / len(
-                    self.model.losses)
-                loss = ctc_loss + self.regularizer_coeff * avg_reg_loss
-            else:
-                loss = ctc_loss
-                avg_reg_loss = 0
+        grads = tape.gradient(ctc_loss, self.trainable_variables)
+        self.optimizer.apply_gradients(zip(grads, self.trainable_variables))
 
-        grads = tape.gradient(loss, self.model.trainable_variables)
-        optimizer.apply_gradients(zip(grads, self.model.trainable_variables))
+        # TODO we do not use self.compiled_loss, check how to do this instead
+        # self.compiled_metrics.update_state(labels, logits)
+        self.loss_tracker.update_state(ctc_loss)
+        return {"loss": self.loss_tracker.result()}
 
-        # probably has to go into train_full...
-        # self.annealer.update_history(loss)
-
-        return ctc_loss, avg_reg_loss
+    @property
+    def metrics(self):
+        return [self.loss_tracker]
 
 
 def build_w2l_model(vocab_size, config):
@@ -129,6 +144,6 @@ def build_w2l_model(vocab_size, config):
         x = tfkl.ReLU()(x)
     logits = tfkl.Conv1D(vocab_size + 1, 1)(x)
 
-    w2l = tf.keras.Model(wave_input, logits)
+    w2l = W2L(wave_input, logits)
 
     return w2l
