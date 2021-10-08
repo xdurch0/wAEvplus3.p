@@ -26,10 +26,11 @@ def train_asr(config: DictConfig):
     callback_plateau = tf.keras.callbacks.ReduceLROnPlateau(
         patience=100, verbose=1)
     callback_tensorboard = tf.keras.callbacks.TensorBoard(
-        histogram_freq=10, write_steps_per_second=True, update_freq="epoch")
+        histogram_freq=10, write_steps_per_second=True, update_freq="epoch",
+        log_dir=config.path.logs)
     callback_stop = tf.keras.callbacks.EarlyStopping(patience=300)
     callback_checkpoint = tf.keras.callbacks.ModelCheckpoint(
-        config.path.model, save_best_only=True)
+        config.path.model, save_best_only=True, save_weights_only=True)
     callbacks = [callback_plateau, callback_tensorboard, callback_stop,
                  callback_checkpoint]
 

@@ -107,6 +107,7 @@ class W2L(tf.keras.Model):
         audio = inputs["audio"]
         audio_length = inputs["audio_length"]
         transcriptions = targets["transcription"]
+        transcription_length = targets["transcription_length"]
 
         with tf.GradientTape() as tape:
             logits = self(audio, training=True)
@@ -115,14 +116,12 @@ class W2L(tf.keras.Model):
 
             audio_length = tf.cast(audio_length / 2, tf.int32)
 
-            transcriptions_sparse = dense_to_sparse(transcriptions,
-                                                    sparse_val=-1)
             # note this is the "CPU version" which may be slower, but earlier
             # attempts at using the GPU version resulted in catastrophe...
             ctc_loss = tf.reduce_mean(tf.nn.ctc_loss(
-                labels=transcriptions_sparse,
+                labels=transcriptions,
                 logits=logits_time_major,
-                label_length=None,
+                label_length=transcription_length,
                 logit_length=audio_length,
                 logits_time_major=True,
                 blank_index=0))
@@ -156,7 +155,7 @@ class W2L(tf.keras.Model):
             blank_index=0))
 
         self.loss_tracker.update_state(ctc_loss)
-        return {"val_loss": self.loss_tracker.result()}
+        return {"loss": self.loss_tracker.result()}
 
     @property
     def metrics(self):
