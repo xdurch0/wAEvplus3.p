@@ -108,7 +108,7 @@ class W2L(tf.keras.Model):
 
         # take into account mel transformation
         # TODO HORRIBLE MAGIC NUMBERS OH GOD
-        audio_length = tf.cast(tf.math.ceil(tf.cast(audio_length, tf.float32) + 1 / 128), tf.int32)
+        audio_length = tf.cast(tf.math.ceil((tf.cast(audio_length, tf.float32) + 1) / 128), tf.int32)
         # take into account stride of the model
         audio_length = tf.cast(audio_length / 2, tf.int32)
 
@@ -128,6 +128,7 @@ class W2L(tf.keras.Model):
                 blank_index=0))
 
         grads = tape.gradient(ctc_loss, self.trainable_variables)
+        grads, _ = tf.clip_by_global_norm(grads, 1.)
         self.optimizer.apply_gradients(zip(grads, self.trainable_variables))
 
         self.loss_tracker.update_state(ctc_loss)
@@ -141,7 +142,7 @@ class W2L(tf.keras.Model):
         # take into account mel transformation
         # TODO HORRIBLE MAGIC NUMBERS OH GOD
         audio_length = tf.cast(
-            tf.math.ceil(tf.cast(audio_length, tf.float32) + 1 / 128), tf.int32)
+            tf.math.ceil((tf.cast(audio_length, tf.float32) + 1) / 128), tf.int32)
         # take into account stride of the model
         audio_length = tf.cast(audio_length / 2, tf.int32)
 
@@ -175,10 +176,11 @@ def build_w2l_model(vocab_size: int,
     x = LogMel(config.features.mel_freqs, config.features.window_size,
                config.features.hop_length, config.features.sample_rate,
                trainable=False)(wave_input)
+    x = tfkl.BatchNormalization()(x)
     for n_filters, width, stride in layer_params:
         x = tfkl.Conv1D(n_filters, width, strides=stride, padding="same")(x)
         x = tfkl.BatchNormalization()(x)
-        x = tfkl.ReLU()(x)
+        x = tfkl.ELU()(x)
     logits = tfkl.Conv1D(vocab_size + 1, 1)(x)
 
     w2l = W2L(wave_input, logits)
