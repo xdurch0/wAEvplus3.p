@@ -112,6 +112,8 @@ class W2L(tf.keras.Model):
         # take into account stride of the model
         audio_length = tf.cast(audio_length / 2, tf.int32)
 
+        transcriptions_sparse = dense_to_sparse(transcriptions)
+
         with tf.GradientTape() as tape:
             logits = self(audio, training=True)
             # after this we need logits in shape time x batch_size x vocab_size
@@ -120,9 +122,9 @@ class W2L(tf.keras.Model):
             # note this is the "CPU version" which may be slower, but earlier
             # attempts at using the GPU version resulted in catastrophe...
             ctc_loss = tf.reduce_mean(tf.nn.ctc_loss(
-                labels=transcriptions,
+                labels=transcriptions_sparse,
                 logits=logits_time_major,
-                label_length=transcription_length,
+                label_length=None,
                 logit_length=audio_length,
                 logits_time_major=True,
                 blank_index=0))
@@ -146,14 +148,16 @@ class W2L(tf.keras.Model):
         # take into account stride of the model
         audio_length = tf.cast(audio_length / 2, tf.int32)
 
+        transcriptions_sparse = dense_to_sparse(transcriptions)
+
         logits = self(audio, training=True)
         # after this we need logits in shape time x batch_size x vocab_size
         logits_time_major = tf.transpose(logits, [1, 0, 2])
 
         ctc_loss = tf.reduce_mean(tf.nn.ctc_loss(
-            labels=transcriptions,
+            labels=transcriptions_sparse,
             logits=logits_time_major,
-            label_length=transcription_length,
+            label_length=None,
             logit_length=audio_length,
             logits_time_major=True,
             blank_index=0))
