@@ -5,7 +5,7 @@ path:
   array_dir: ${path.root_dir}/raw_np
   vocab: ${path.root_dir}/vocab.txt
   model: ${path.root_dir}/models/best.h5
-  logs: ${path.root_dir}/logs
+  logs: /project/jens/wAEvplus3.p/logs
 
 features:
   mel_freqs: 128

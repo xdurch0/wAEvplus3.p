@@ -1,4 +1,4 @@
-from typing import Dict, Union
+from typing import Dict, Union, Tuple
 
 import librosa
 import tensorflow as tf
@@ -102,19 +102,20 @@ class W2L(tf.keras.Model):
         self.loss_tracker = tf.metrics.Mean(name="loss")
 
     def train_step(self,
-                   data: tuple) -> Dict[str, tf.Tensor]:
-        inputs, targets = data
-        audio = inputs["audio"]
-        audio_length = inputs["audio_length"]
-        transcriptions = targets["transcription"]
-        transcription_length = targets["transcription_length"]
+                   data: Tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor])\
+            -> Dict[str, tf.Tensor]:
+        audio, audio_length, transcriptions, transcription_length = data
+
+        # take into account mel transformation
+        # TODO HORRIBLE MAGIC NUMBERS OH GOD
+        audio_length = tf.cast(tf.math.ceil(tf.cast(audio_length, tf.float32) + 1 / 128), tf.int32)
+        # take into account stride of the model
+        audio_length = tf.cast(audio_length / 2, tf.int32)
 
         with tf.GradientTape() as tape:
             logits = self(audio, training=True)
             # after this we need logits in shape time x batch_size x vocab_size
             logits_time_major = tf.transpose(logits, [1, 0, 2])
-
-            audio_length = tf.cast(audio_length / 2, tf.int32)
 
             # note this is the "CPU version" which may be slower, but earlier
             # attempts at using the GPU version resulted in catastrophe...
@@ -133,18 +134,20 @@ class W2L(tf.keras.Model):
         return {"loss": self.loss_tracker.result()}
 
     def test_step(self,
-                  data: tuple) -> Dict[str, tf.Tensor]:
-        inputs, targets = data
-        audio = inputs["audio"]
-        audio_length = inputs["audio_length"]
-        transcriptions = targets["transcription"]
-        transcription_length = targets["transcription_length"]
+                  data: Tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor])\
+            -> Dict[str, tf.Tensor]:
+        audio, audio_length, transcriptions, transcription_length = data
+
+        # take into account mel transformation
+        # TODO HORRIBLE MAGIC NUMBERS OH GOD
+        audio_length = tf.cast(
+            tf.math.ceil(tf.cast(audio_length, tf.float32) + 1 / 128), tf.int32)
+        # take into account stride of the model
+        audio_length = tf.cast(audio_length / 2, tf.int32)
 
         logits = self(audio, training=True)
         # after this we need logits in shape time x batch_size x vocab_size
         logits_time_major = tf.transpose(logits, [1, 0, 2])
-
-        audio_length = tf.cast(audio_length / 2, tf.int32)
 
         ctc_loss = tf.reduce_mean(tf.nn.ctc_loss(
             labels=transcriptions,

@@ -76,8 +76,7 @@ def w2l_dataset_npy(config: DictConfig,
     data = data.padded_batch(
         config.training.batch_size, padded_shapes=pad_shapes,
         padding_values=pad_values)
-    map_fn = pack_inputs_in_dict
-    data = data.map(map_fn, num_parallel_calls=tf.data.AUTOTUNE)
+    # data = data.map(pack_inputs_in_dict, num_parallel_calls=tf.data.AUTOTUNE)
     data = data.prefetch(tf.data.AUTOTUNE)
 
     return data
