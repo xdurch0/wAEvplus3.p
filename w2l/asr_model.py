@@ -130,8 +130,10 @@ class W2L(tf.keras.Model):
                 blank_index=0))
 
         grads = tape.gradient(ctc_loss, self.trainable_variables)
-        grads, _ = tf.clip_by_global_norm(grads, 1.)
+        grads, global_norm = tf.clip_by_global_norm(grads, 1.)
         self.optimizer.apply_gradients(zip(grads, self.trainable_variables))
+        tf.summary.scalar("gradient_norm", global_norm,
+                          step=self.optimizer.iterations)
 
         self.loss_tracker.update_state(ctc_loss)
         return {"loss": self.loss_tracker.result()}

@@ -8,18 +8,18 @@ from omegaconf import DictConfig
 
 def w2l_dataset_npy(config: DictConfig,
                     which_sets: Iterable[str],
-                    train: bool,
                     vocab: Dict[str, int],
-                    normalize) -> tf.data.Dataset:
+                    train: bool,
+                    normalize: bool) -> tf.data.Dataset:
     """Builds a TF dataset for the preprocessed data.
 
     Parameters:
         config: hydra config object.
         which_sets: Contain all the subsets to be considered (e.g.
                     train-clean-360 etc.).
-        train: Whether to shuffle and repeat data.
         vocab: Dictionary mapping characters to indices.
-        normalize: Bool; if True, normalize each input array to mean 0, std 1.
+        train: Whether to shuffle and repeat data.
+        normalize: If True, normalize each input array to mean 0, std 1.
 
     Returns:
         Dataset ready for consumption.
