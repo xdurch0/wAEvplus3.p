@@ -1,11 +1,12 @@
 path:
-  raw_dir: /project/jens/wAEvplus3.p/data_raw/LibriSpeech
-  root_dir: /project/jens/wAEvplus3.p/preprocessed
-  csv: ${path.root_dir}/corpus.csv
-  array_dir: ${path.root_dir}/raw_np
-  vocab: ${path.root_dir}/vocab.txt
+  root_dir: /project/jens/wAEvplus3.p
+  raw_dir: ${path.root_dir}/data_raw/LibriSpeech
+  preprocessed_dir: ${path.root_dir}/preprocessed
+  csv: ${path.preprocessed_dir}/corpus.csv
+  array_dir: ${path.preprocessed_dir}/raw_np
+  vocab: ${path.preprocessed_dir}/vocab.txt
   model: ${path.root_dir}/models/best.h5
-  logs: /project/jens/wAEvplus3.p/logs
+  logs: ${path.root_dir}/logs
 
 features:
   mel_freqs: 128
@@ -19,4 +20,6 @@ training:
   batch_size: 16
   learning_rate: 0.0001
   weight_decay: 0.0001
+  warmup_epochs: 1
+  steps_per_epoch: 5000
   epochs: 60

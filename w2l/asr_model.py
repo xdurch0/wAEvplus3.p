@@ -97,8 +97,9 @@ class LogMel(tfkl.Layer):
 class W2L(tf.keras.Model):
     def __init__(self,
                  inputs: tf.Tensor,
-                 outputs: tf.Tensor):
-        super().__init__(inputs, outputs)
+                 outputs: tf.Tensor,
+                 **kwargs):
+        super().__init__(inputs, outputs, **kwargs)
         self.loss_tracker = tf.metrics.Mean(name="loss")
 
     def train_step(self,
@@ -130,7 +131,7 @@ class W2L(tf.keras.Model):
                 blank_index=0))
 
         grads = tape.gradient(ctc_loss, self.trainable_variables)
-        grads, global_norm = tf.clip_by_global_norm(grads, 1.)
+        grads, global_norm = tf.clip_by_global_norm(grads, 500.)
         self.optimizer.apply_gradients(zip(grads, self.trainable_variables))
         tf.summary.scalar("gradient_norm", global_norm,
                           step=self.optimizer.iterations)
@@ -181,14 +182,16 @@ def build_w2l_model(vocab_size: int,
 
     x = LogMel(config.features.mel_freqs, config.features.window_size,
                config.features.hop_length, config.features.sample_rate,
-               trainable=False)(wave_input)
-    x = tfkl.BatchNormalization()(x)
-    for n_filters, width, stride in layer_params:
-        x = tfkl.Conv1D(n_filters, width, strides=stride, padding="same")(x)
-        x = tfkl.BatchNormalization()(x)
-        x = tfkl.ELU()(x)
-    logits = tfkl.Conv1D(vocab_size + 1, 1)(x)
+               trainable=False, name="log_mel")(wave_input)
+    x = tfkl.BatchNormalization(name="input_batchnorm")(x)
+    for ind, (n_filters, width, stride) in enumerate(layer_params):
+        layer_string = "_layer_" + str(ind)
+        x = tfkl.Conv1D(n_filters, width, strides=stride, padding="same",
+                        name="conv" + layer_string)(x)
+        x = tfkl.BatchNormalization(name="bn" + layer_string)(x)
+        x = tfkl.ELU(name="activation" + layer_string)(x)
+    logits = tfkl.Conv1D(vocab_size + 1, 1, name="logits")(x)
 
-    w2l = W2L(wave_input, logits)
+    w2l = W2L(wave_input, logits, name="wav2letter")
 
     return w2l
