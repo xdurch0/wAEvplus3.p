@@ -25,8 +25,8 @@ def train_asr(config: DictConfig):
 
     lr_schedule = CosineDecayWarmup(
         peak_learning_rate=config.training.learning_rate,
-        warmup_steps=config.training.warmup_epochs*config.trainng.steps_per_epoch,
-        decay_steps=config.training.epochs*config.training.steps_per_epoch)
+        warmup_steps=config.training.warmup_epochs*config.training.steps_per_epoch,
+        decay_steps=(config.training.epochs - config.training.warmup_epochs)*config.training.steps_per_epoch)
     optimizer = tfa.optimizers.AdamW(
         weight_decay=config.training.weight_decay,
         learning_rate=lr_schedule)
@@ -38,7 +38,7 @@ def train_asr(config: DictConfig):
         log_dir=config.path.logs, profile_batch=0)
     callback_stop = tf.keras.callbacks.EarlyStopping(patience=4, verbose=1)
     callback_checkpoint = tf.keras.callbacks.ModelCheckpoint(
-        config.path.model, save_best_only=True, save_weights_only=True)
+        config.path.model, save_best_only=True)
     callbacks = [callback_tensorboard, callback_stop, callback_checkpoint]
 
     history = w2l.fit(train_dataset,

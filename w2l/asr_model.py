@@ -93,6 +93,14 @@ class LogMel(tfkl.Layer):
 
         return logmel
 
+    def get_config(self):
+        return {"n_mels": self.n_mels, "n_fft": self.n_fft,
+                "hop_len": self.hop_len, "pad": self.pad}
+
+    @classmethod
+    def from_config(cls, config):
+        return cls(**config)
+
 
 class W2L(tf.keras.Model):
     def __init__(self,
@@ -131,7 +139,7 @@ class W2L(tf.keras.Model):
                 blank_index=0))
 
         grads = tape.gradient(ctc_loss, self.trainable_variables)
-        grads, global_norm = tf.clip_by_global_norm(grads, 500.)
+        grads, global_norm = tf.clip_by_global_norm(grads, 1.)
         self.optimizer.apply_gradients(zip(grads, self.trainable_variables))
         tf.summary.scalar("gradient_norm", global_norm,
                           step=self.optimizer.iterations)
@@ -153,7 +161,7 @@ class W2L(tf.keras.Model):
 
         transcriptions_sparse = dense_to_sparse(transcriptions)
 
-        logits = self(audio, training=True)
+        logits = self(audio, training=False)
         # after this we need logits in shape time x batch_size x vocab_size
         logits_time_major = tf.transpose(logits, [1, 0, 2])
 
@@ -189,7 +197,7 @@ def build_w2l_model(vocab_size: int,
         x = tfkl.Conv1D(n_filters, width, strides=stride, padding="same",
                         name="conv" + layer_string)(x)
         x = tfkl.BatchNormalization(name="bn" + layer_string)(x)
-        x = tfkl.ELU(name="activation" + layer_string)(x)
+        x = tfkl.ReLU(name="activation" + layer_string)(x)
     logits = tfkl.Conv1D(vocab_size + 1, 1, name="logits")(x)
 
     w2l = W2L(wave_input, logits, name="wav2letter")

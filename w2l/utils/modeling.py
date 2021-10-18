@@ -33,7 +33,10 @@ class CosineDecayWarmup(tf.optimizers.schedules.LearningRateSchedule):
             if step <= self.warmup_steps:
                 completed_fraction = tf.cast(step, tf.float32) / self.warmup_steps
                 warmed_up = self.peak_learning_rate * completed_fraction
-                return tf.maximum(warmed_up, 1e-8)
+                capped = tf.maximum(warmed_up, 1e-10)
+                tf.summary.scalar("decay_lr", capped,
+                                  step=tf.cast(step, tf.int64))
+                return capped
             else:
                 peak_learning_rate = tf.convert_to_tensor(
                     self.peak_learning_rate, name="peak_learning_rate")
@@ -47,7 +50,10 @@ class CosineDecayWarmup(tf.optimizers.schedules.LearningRateSchedule):
                     tf.constant(np.pi) * completed_fraction))
 
                 decayed = (1 - self.alpha) * cosine_decayed + self.alpha
-                return tf.multiply(peak_learning_rate, decayed)
+                decayed_lr = tf.multiply(peak_learning_rate, decayed)
+                tf.summary.scalar("decay_lr", decayed_lr,
+                                  step=tf.cast(step, tf.int64))
+                return decayed_lr
 
     def get_config(self):
         return {
