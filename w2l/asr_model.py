@@ -56,6 +56,7 @@ class LogMel(tfkl.Layer):
         self.n_fft = n_fft
         self.hop_len = hop_len
         self.pad = pad
+        self.sr = sr
 
         to_mel = librosa.filters.mel(sr, n_fft, n_mels=n_mels).T
 
@@ -95,7 +96,7 @@ class LogMel(tfkl.Layer):
 
     def get_config(self):
         return {"n_mels": self.n_mels, "n_fft": self.n_fft,
-                "hop_len": self.hop_len, "pad": self.pad}
+                "hop_len": self.hop_len, "pad": self.pad, "sr": self.sr}
 
     @classmethod
     def from_config(cls, config):
