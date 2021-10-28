@@ -100,9 +100,13 @@ class W2L(tf.keras.Model):
     def __init__(self,
                  inputs: tf.Tensor,
                  outputs: tf.Tensor,
+                 gradient_clipping: float,
+                 hop_length: int,
                  **kwargs):
         super().__init__(inputs, outputs, **kwargs)
         self.loss_tracker = tf.metrics.Mean(name="loss")
+        self.gradient_clipping = gradient_clipping
+        self.hop_length = hop_length
 
     def train_step(self,
                    data: Tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor])\
@@ -110,8 +114,7 @@ class W2L(tf.keras.Model):
         audio, audio_length, transcriptions, transcription_length = data
 
         # take into account mel transformation
-        # TODO HORRIBLE MAGIC NUMBERS OH GOD
-        audio_length = tf.cast(tf.math.ceil((tf.cast(audio_length, tf.float32) + 1) / 128), tf.int32)
+        audio_length = tf.cast(tf.math.ceil((tf.cast(audio_length, tf.float32) + 1) / self.hop_length), tf.int32)
         # take into account stride of the model
         audio_length = tf.cast(audio_length / 2, tf.int32)
 
@@ -138,9 +141,12 @@ class W2L(tf.keras.Model):
                 blank_index=0))
 
         grads = tape.gradient(ctc_loss, self.trainable_variables)
-        grads, global_norm = tf.clip_by_global_norm(grads, 500.)
+        grads, global_norm = tf.clip_by_global_norm(
+            grads, self.gradient_clipping)
         self.optimizer.apply_gradients(zip(grads, self.trainable_variables))
         tf.summary.scalar("gradient_norm", global_norm,
+                          step=self.optimizer.iterations)
+        tf.summary.scalar("actual_batch_loss", ctc_loss,
                           step=self.optimizer.iterations)
 
         self.loss_tracker.update_state(ctc_loss)
@@ -152,9 +158,8 @@ class W2L(tf.keras.Model):
         audio, audio_length, transcriptions, transcription_length = data
 
         # take into account mel transformation
-        # TODO HORRIBLE MAGIC NUMBERS OH GOD
         audio_length = tf.cast(
-            tf.math.ceil((tf.cast(audio_length, tf.float32) + 1) / 128), tf.int32)
+            tf.math.ceil((tf.cast(audio_length, tf.float32) + 1) / self.hop_length), tf.int32)
         # take into account stride of the model
         audio_length = tf.cast(audio_length / 2, tf.int32)
 
@@ -200,6 +205,9 @@ def build_w2l_model(vocab_size: int,
     logits = tfkl.Conv1D(vocab_size + 1, 1, use_bias=False, name="logits")(x)
     logits = tfkl.BatchNormalization(name="logit_norm")(logits)
 
-    w2l = W2L(wave_input, logits, name="wav2letter")
+    w2l = W2L(wave_input, logits,
+              gradient_clipping=config.training.gradient_clipping,
+              hop_length=config.features.hop_length,
+              name="wav2letter")
 
     return w2l
