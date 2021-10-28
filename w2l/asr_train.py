@@ -11,15 +11,30 @@ from .utils.vocab import parse_vocab
 def train_asr(config: DictConfig):
     print("Preparing dataset...")
     char_to_ind, ind_to_char = parse_vocab(config.path.vocab)
+
+    if config.training.subsets == "all":
+        train_subsets = ["train-clean-100", "train-clean-360",
+                         "train-other-500"]
+        val_subsets = ["dev-clean", "dev-other"]
+    elif config.training.subsets == "small":
+        train_subsets = ["train-clean-100", "train-clean-360"]
+        val_subsets = ["dev-clean"]
+    else:
+        raise ValueError("Invalid subsets specified.")
+
     train_dataset = w2l_dataset_npy(
         config,
-        ["train-clean-100", "train-clean-360", "train-other-500"],
+        train_subsets,
         char_to_ind,
         train=True,
         normalize=False)
 
-    val_dataset = w2l_dataset_npy(config, ["dev-clean", "dev-other"],
-                                  char_to_ind, train=False, normalize=False)
+    val_dataset = w2l_dataset_npy(
+        config,
+        val_subsets,
+        char_to_ind,
+        train=False,
+        normalize=False)
 
     w2l = build_w2l_model(len(char_to_ind), config)
 
@@ -36,9 +51,11 @@ def train_asr(config: DictConfig):
     callback_tensorboard = tf.keras.callbacks.TensorBoard(
         histogram_freq=1, write_steps_per_second=True, update_freq=100,
         log_dir=config.path.logs, profile_batch=0)
-    callback_stop = tf.keras.callbacks.EarlyStopping(patience=4, verbose=1)
+    callback_stop = tf.keras.callbacks.EarlyStopping(
+        patience=20000 // config.training.steps_per_epoch, verbose=1)
     callback_checkpoint = tf.keras.callbacks.ModelCheckpoint(
-        config.path.model, save_best_only=True)
+        config.path.model, save_best_only=True, save_weights_only=True,
+        verbose=1)
     callbacks = [callback_tensorboard, callback_stop, callback_checkpoint]
 
     history = w2l.fit(train_dataset,

@@ -20,6 +20,7 @@ training:
   batch_size: 16
   learning_rate: 0.0001
   weight_decay: 0.0001
-  warmup_epochs: 5
-  steps_per_epoch: 1000
-  epochs: 200
+  warmup_epochs: 2
+  steps_per_epoch: 2000
+  epochs: 100
+  subsets: small

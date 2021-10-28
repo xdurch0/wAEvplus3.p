@@ -60,15 +60,8 @@ class LogMel(tfkl.Layer):
 
         to_mel = librosa.filters.mel(sr, n_fft, n_mels=n_mels).T
 
-        self.mel_matrix = tf.Variable(initial_value=to_mel,
-                                      trainable=False,
-                                      dtype=tf.float32,
-                                      name=self.name + "_weights")
-        self.compression = tf.Variable(
-            initial_value=tf.ones(n_mels) * inverse_softplus(compression),
-            trainable=self.trainable,
-            dtype=tf.float32,
-            name=self.name + "_compression")
+        self.mel_matrix = tf.convert_to_tensor(to_mel, dtype=tf.float32)
+        self.compression = tf.convert_to_tensor(compression, dtype=tf.float32)
 
     def call(self,
              inputs: tf.Tensor,
@@ -90,7 +83,7 @@ class LogMel(tfkl.Layer):
         power = tf.abs(spectros) ** 2
 
         mel = tf.matmul(power, self.mel_matrix)
-        logmel = tf.math.log(mel + tf.nn.softplus(self.compression))
+        logmel = tf.math.log(mel + self.compression)
 
         return logmel
 
@@ -126,6 +119,11 @@ class W2L(tf.keras.Model):
 
         with tf.GradientTape() as tape:
             logits = self(audio, training=True)
+
+            # shift logits such that the maximum (per batch element and time
+            # step) is zero
+            logits -= tf.reduce_max(logits, axis=-1, keepdims=True)
+
             # after this we need logits in shape time x batch_size x vocab_size
             logits_time_major = tf.transpose(logits, [1, 0, 2])
 
@@ -140,7 +138,7 @@ class W2L(tf.keras.Model):
                 blank_index=0))
 
         grads = tape.gradient(ctc_loss, self.trainable_variables)
-        grads, global_norm = tf.clip_by_global_norm(grads, 1.)
+        grads, global_norm = tf.clip_by_global_norm(grads, 500.)
         self.optimizer.apply_gradients(zip(grads, self.trainable_variables))
         tf.summary.scalar("gradient_norm", global_norm,
                           step=self.optimizer.iterations)
@@ -196,10 +194,11 @@ def build_w2l_model(vocab_size: int,
     for ind, (n_filters, width, stride) in enumerate(layer_params):
         layer_string = "_layer_" + str(ind)
         x = tfkl.Conv1D(n_filters, width, strides=stride, padding="same",
-                        name="conv" + layer_string)(x)
+                        use_bias=False, name="conv" + layer_string)(x)
         x = tfkl.BatchNormalization(name="bn" + layer_string)(x)
         x = tfkl.ReLU(name="activation" + layer_string)(x)
-    logits = tfkl.Conv1D(vocab_size + 1, 1, name="logits")(x)
+    logits = tfkl.Conv1D(vocab_size + 1, 1, use_bias=False, name="logits")(x)
+    logits = tfkl.BatchNormalization(name="logit_norm")(logits)
 
     w2l = W2L(wave_input, logits, name="wav2letter")
 
