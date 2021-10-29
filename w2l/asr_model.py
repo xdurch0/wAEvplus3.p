@@ -180,6 +180,29 @@ class W2L(tf.keras.Model):
         self.loss_tracker.update_state(ctc_loss)
         return {"loss": self.loss_tracker.result()}
 
+    def decode(self, audio, audio_length, vocab):
+        logits = self(audio, training=False)
+        logits_time_major = tf.transpose(logits, [1, 0, 2])
+
+        # take into account mel transformation
+        audio_length = tf.cast(
+            tf.math.ceil(
+                (tf.cast(audio_length, tf.float32) + 1) / self.hop_length),
+            tf.int32)
+        # take into account stride of the model
+        audio_length = tf.cast(audio_length / 2, tf.int32)
+
+        decoded, _ = tf.nn.ctc_beam_search_decoder(
+            logits_time_major, audio_length)
+        decoded = tf.sparse.to_dense(decoded[0])  # "top path" number 1
+
+        # have prediction indices, gotta convert to strings
+        transcriptions = []
+        for sequence in decoded.numpy():
+            to_text = [vocab[ind] for ind in sequence if ind != 0]
+            transcriptions.append("".join(to_text))
+        return transcriptions
+
     @property
     def metrics(self):
         return [self.loss_tracker]

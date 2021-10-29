@@ -1,3 +1,6 @@
+import os
+from datetime import datetime
+
 import tensorflow as tf
 import tensorflow_addons as tfa
 from omegaconf import DictConfig
@@ -48,13 +51,16 @@ def train_asr(config: DictConfig):
 
     w2l.compile(optimizer=optimizer, run_eagerly=True)
 
+    time_string = str(datetime.now())
+    tb_logdir = os.path.join(config.path.logs, "run_" + time_string)
+    model_path = config.path.model + "_" + time_string + ".h5"
     callback_tensorboard = tf.keras.callbacks.TensorBoard(
         histogram_freq=1, write_steps_per_second=True, update_freq=100,
-        log_dir=config.path.logs, profile_batch=0)
+        log_dir=tb_logdir, profile_batch=0)
     callback_stop = tf.keras.callbacks.EarlyStopping(
         patience=20000 // config.training.steps_per_epoch, verbose=1)
     callback_checkpoint = tf.keras.callbacks.ModelCheckpoint(
-        config.path.model, save_best_only=True, save_weights_only=True,
+        model_path, save_best_only=True, save_weights_only=True,
         verbose=1)
     callbacks = [callback_tensorboard, callback_stop, callback_checkpoint]
 

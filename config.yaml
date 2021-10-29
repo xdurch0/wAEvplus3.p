@@ -5,7 +5,7 @@ path:
   csv: ${path.preprocessed_dir}/corpus.csv
   array_dir: ${path.preprocessed_dir}/raw_np
   vocab: ${path.preprocessed_dir}/vocab.txt
-  model: ${path.root_dir}/models/best.h5
+  model: ${path.root_dir}/models/best
   logs: ${path.root_dir}/logs
 
 features:
@@ -19,7 +19,7 @@ features:
 training:
   batch_size: 16
   learning_rate: 0.0001
-  weight_decay: 0.0001
+  weight_decay: 0.00003
   warmup_epochs: 1
   steps_per_epoch: 2000
   epochs: 100
