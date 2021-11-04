@@ -58,7 +58,38 @@ class CosineDecayWarmup(tf.optimizers.schedules.LearningRateSchedule):
     def get_config(self):
         return {
             "peak_learning_rate": self.peak_learning_rate,
+            "warmup_steps": self.warmup_steps,
             "decay_steps": self.decay_steps,
             "alpha": self.alpha,
-            "name": self.name
-        }
+            "name": self.name}
+
+
+def multiscale_spectrogram_loss(targets, outputs, audio_length):
+    fft_sizes = [128, 256, 512, 1024, 2048]
+    total_loss = 0
+
+    for n_fft in fft_sizes:
+        padded_targets = tf.pad(
+            targets, ((0, 0), (n_fft // 2, n_fft // 2), (0, 0)),
+            mode="reflect")
+        padded_outputs = tf.pad(
+            outputs, ((0, 0), (n_fft // 2, n_fft // 2), (0, 0)),
+            mode="reflect")
+
+        target_spectogram = tf.signal.stft(padded_targets[:, :, 0],
+                                           n_fft, n_fft//4)
+        output_spectrogram = tf.signal.stft(padded_outputs[:, :, 0],
+                                            n_fft, n_fft//4)
+
+        absolute_difference = tf.abs(target_spectogram - output_spectrogram)
+        absolute_log_difference = tf.abs(tf.math.log(target_spectogram)
+                                         - tf.math.log(output_spectrogram))
+
+        spectrogram_lengths = tf.cast(
+            tf.math.ceil((tf.cast(audio_length, tf.float32) + 1) / n_fft // 4), tf.int32)
+        mask = tf.sequence_mask(spectrogram_lengths)
+
+        contribution = tf.reduce_sum(mask * (absolute_difference + absolute_log_difference)) / tf.reduce_sum(mask)
+        total_loss += contribution
+
+    return total_loss

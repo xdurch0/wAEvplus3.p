@@ -1,10 +1,56 @@
 import tensorflow as tf
 from omegaconf import DictConfig
 
+from .utils.modeling import multiscale_spectrogram_loss
+
 tfkl = tf.keras.layers
 
 
-def build_conversion_model(config: DictConfig) -> tf.keras.Model:
+class ConversionModel(tf.keras.Model):
+    def __init__(self, inputs, outputs, gradient_clipping, **kwargs):
+        super().__init__(inputs, outputs, **kwargs)
+        self.loss_tracker = tf.metrics.Mean(name="loss")
+        self.gradient_clipping = gradient_clipping
+
+    def train_step(self, data):
+        audio, audio_length, _, _ = data
+
+        mask = tf.sequence_mask(audio_length, dtype=tf.float32)
+
+        with tf.GradientTape() as tape:
+            reconstruction = self(audio, training=True)
+
+            loss = multiscale_spectrogram_loss(audio, reconstruction,
+                                               audio_length)
+
+        grads = tape.gradient(loss, self.trainable_variables)
+        grads, global_norm = tf.clip_by_global_norm(
+            grads, self.gradient_clipping)
+        self.optimizer.apply_gradients(zip(grads, self.trainable_variables))
+
+        self.loss_tracker.update_state(loss)
+        return {"loss": self.loss_tracker.result()}
+
+    def test_step(self, data):
+        audio, audio_length, _, _ = data
+
+        mask = tf.sequence_mask(audio_length, dtype=tf.float32)
+
+        with tf.GradientTape() as tape:
+            reconstruction = self(audio, training=False)
+
+            loss = multiscale_spectrogram_loss(audio, reconstruction,
+                                               audio_length)
+
+        self.loss_tracker.update_state(loss)
+        return {"loss": self.loss_tracker.result()}
+
+    @property
+    def metrics(self):
+        return [self.loss_tracker]
+
+
+def build_voice_conversion_model(config: DictConfig) -> tf.keras.Model:
     # encoder-decoder model with 1d convolutions :shrug:
     wave_input = tf.keras.Input((None, 1))
 
@@ -27,4 +73,6 @@ def build_conversion_model(config: DictConfig) -> tf.keras.Model:
 
     reconstructed = tfkl.Conv1D(1, 1)(x)
 
-    return tf.keras.Model(wave_input, reconstructed)
+    return ConversionModel(wave_input, reconstructed,
+                           gradient_clipping=config.training.gradient_clipping,
+                           name="voice_conversion")
