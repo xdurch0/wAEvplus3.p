@@ -68,7 +68,7 @@ def build_voice_conversion_model(config: DictConfig) -> tf.keras.Model:
                         use_bias=False, name="conv" + layer_string)(x)
         x = tfkl.BatchNormalization(name="bn" + layer_string, scale=False)(x)
         x = tfkl.ReLU(name="activation" + layer_string)(x)
-    x = tfkl.UpSampling1D(4)
+    x = tfkl.UpSampling1D(4)(x)
     reconstructed = tfkl.Conv1D(1, 1)(x)
 
     return ConversionModel(wave_input, reconstructed,
