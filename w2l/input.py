@@ -105,6 +105,12 @@ def load_arrays_map_transcriptions(file_name: bytes,
 
     """
     array = np.load(file_name.decode("utf-8"))
+    # temporary hack for the reconstruction thing: pad arrays so that they
+    # are divisible by 64
+    remainder = len(array) % 64
+    if remainder:
+        array = np.pad(array, ((0, remainder),))
+
     trans_mapped = np.array([vocab[ch] for ch in trans.decode("utf-8")],
                             dtype=np.int32)
     audio_length = np.int32(array.shape[-1])

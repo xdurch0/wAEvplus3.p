@@ -15,8 +15,6 @@ class ConversionModel(tf.keras.Model):
     def train_step(self, data):
         audio, audio_length, _, _ = data
 
-        mask = tf.sequence_mask(audio_length, dtype=tf.float32)
-
         with tf.GradientTape() as tape:
             reconstruction = self(audio, training=True)
 
@@ -33,8 +31,6 @@ class ConversionModel(tf.keras.Model):
 
     def test_step(self, data):
         audio, audio_length, _, _ = data
-
-        mask = tf.sequence_mask(audio_length, dtype=tf.float32)
 
         with tf.GradientTape() as tape:
             reconstruction = self(audio, training=False)
@@ -62,15 +58,17 @@ def build_voice_conversion_model(config: DictConfig) -> tf.keras.Model:
                         use_bias=False, name="conv" + layer_string)(x)
         x = tfkl.BatchNormalization(name="bn" + layer_string, scale=False)(x)
         x = tfkl.ReLU(name="activation" + layer_string)(x)
+        x = tfkl.MaxPool1D(4, padding="same", name="pool" + layer_string)(x)
 
     decoder_params = [(128, 7, 1), (64, 7, 1), (32, 7, 1)]
     for ind, (n_filters, width, stride) in enumerate(decoder_params):
         layer_string = "_decoder_" + str(ind)
+        x = tfkl.UpSampling1D(4)(x)
         x = tfkl.Conv1D(n_filters, width, strides=stride, padding="same",
                         use_bias=False, name="conv" + layer_string)(x)
         x = tfkl.BatchNormalization(name="bn" + layer_string, scale=False)(x)
         x = tfkl.ReLU(name="activation" + layer_string)(x)
-
+    x = tfkl.UpSampling1D(4)
     reconstructed = tfkl.Conv1D(1, 1)(x)
 
     return ConversionModel(wave_input, reconstructed,

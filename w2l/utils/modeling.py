@@ -87,7 +87,7 @@ def multiscale_spectrogram_loss(targets, outputs, audio_length):
 
         spectrogram_lengths = tf.cast(
             tf.math.ceil((tf.cast(audio_length, tf.float32) + 1) / n_fft // 4), tf.int32)
-        mask = tf.sequence_mask(spectrogram_lengths)
+        mask = tf.sequence_mask(spectrogram_lengths, dtype=tf.float32)
 
         contribution = tf.reduce_sum(mask * (absolute_difference + absolute_log_difference)) / tf.reduce_sum(mask)
         total_loss += contribution

@@ -49,7 +49,7 @@ def train_conversion(config: DictConfig):
         weight_decay=config.training.weight_decay,
         learning_rate=lr_schedule)
 
-    conversion_model.compile(optimizer=optimizer)
+    conversion_model.compile(optimizer=optimizer, run_eagerly=True)
 
     time_string = str(datetime.now())
     tb_logdir = os.path.join(config.path.logs + "_conversion",
