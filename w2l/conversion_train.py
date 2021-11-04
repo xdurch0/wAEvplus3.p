@@ -5,13 +5,13 @@ import tensorflow as tf
 import tensorflow_addons as tfa
 from omegaconf import DictConfig
 
-from .asr_model import build_w2l_model
+from .conversion_model import build_voice_conversion_model
 from .input import w2l_dataset_npy
 from .utils.modeling import CosineDecayWarmup
 from .utils.vocab import parse_vocab
 
 
-def train_asr(config: DictConfig):
+def train_conversion(config: DictConfig):
     print("Preparing dataset...")
     char_to_ind, ind_to_char = parse_vocab(config.path.vocab)
 
@@ -39,7 +39,7 @@ def train_asr(config: DictConfig):
         train=False,
         normalize=False)
 
-    w2l = build_w2l_model(len(char_to_ind), config)
+    conversion_model = build_voice_conversion_model(config)
 
     lr_schedule = CosineDecayWarmup(
         peak_learning_rate=config.training.learning_rate,
@@ -49,11 +49,12 @@ def train_asr(config: DictConfig):
         weight_decay=config.training.weight_decay,
         learning_rate=lr_schedule)
 
-    w2l.compile(optimizer=optimizer, run_eagerly=True)
+    conversion_model.compile(optimizer=optimizer)
 
     time_string = str(datetime.now())
-    tb_logdir = os.path.join(config.path.logs + "_asr", "run_" + time_string)
-    model_path = config.path.model + "_asr_" + time_string + ".h5"
+    tb_logdir = os.path.join(config.path.logs + "_conversion",
+                             "run_" + time_string)
+    model_path = config.path.model + "_conversion_" + time_string + ".h5"
     callback_tensorboard = tf.keras.callbacks.TensorBoard(
         histogram_freq=1, write_steps_per_second=True, update_freq=100,
         log_dir=tb_logdir, profile_batch=0)
@@ -65,9 +66,10 @@ def train_asr(config: DictConfig):
     callbacks = [callback_tensorboard, callback_stop, callback_checkpoint,
                  tf.keras.callbacks.TerminateOnNaN()]
 
-    history = w2l.fit(train_dataset,
-                      validation_data=val_dataset,
-                      epochs=config.training.epochs,
-                      steps_per_epoch=config.training.steps_per_epoch,
-                      validation_steps=None,
-                      callbacks=callbacks)
+    history = conversion_model.fit(
+        train_dataset,
+        validation_data=val_dataset,
+        epochs=config.training.epochs,
+        steps_per_epoch=config.training.steps_per_epoch,
+        validation_steps=None,
+        callbacks=callbacks)

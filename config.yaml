@@ -17,11 +17,11 @@ features:
   sample_rate: 16000
 
 training:
-  batch_size: 16
+  batch_size: 128
   learning_rate: 0.0001
   weight_decay: 0.00003
   warmup_epochs: 1
-  steps_per_epoch: 2000
-  epochs: 100
+  steps_per_epoch: 500
+  epochs: 400
   subsets: small
   gradient_clipping: 5000.0
