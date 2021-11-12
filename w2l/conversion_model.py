@@ -52,24 +52,35 @@ def build_voice_conversion_model(config: DictConfig) -> tf.keras.Model:
 
     encoder_params = [(32, 7, 1), (64, 7, 1), (128, 7, 1), (256, 7, 1)]
     x = wave_input
+    encoder_outputs = []
     for ind, (n_filters, width, stride) in enumerate(encoder_params):
         layer_string = "_encoder_" + str(ind)
+
+        encoder_outputs.append(x)
         x = tfkl.Conv1D(n_filters, width, strides=stride, padding="same",
                         use_bias=False, name="conv" + layer_string)(x)
         x = tfkl.BatchNormalization(name="bn" + layer_string, scale=False)(x)
         x = tfkl.ReLU(name="activation" + layer_string)(x)
+
         x = tfkl.MaxPool1D(4, padding="same", name="pool" + layer_string)(x)
 
     decoder_params = [(128, 7, 1), (64, 7, 1), (32, 7, 1)]
     for ind, (n_filters, width, stride) in enumerate(decoder_params):
         layer_string = "_decoder_" + str(ind)
-        x = tfkl.UpSampling1D(4)(x)
+        
+        x = tfkl.UpSampling1D(4, name="upsample" + layer_string)(x)
+        x = tfkl.Concatenate(name="concatenate" + layer_string)(
+            [x, encoder_outputs[-(ind + 1)]])
+
         x = tfkl.Conv1D(n_filters, width, strides=stride, padding="same",
                         use_bias=False, name="conv" + layer_string)(x)
         x = tfkl.BatchNormalization(name="bn" + layer_string, scale=False)(x)
         x = tfkl.ReLU(name="activation" + layer_string)(x)
-    x = tfkl.UpSampling1D(4)(x)
-    reconstructed = tfkl.Conv1D(1, 1)(x)
+
+    x = tfkl.UpSampling1D(4)(x, name="upsample_decoder_final")
+    x = tfkl.Concatenate(name="concatenate_decoder_final")(
+        [x, encoder_outputs[0]])
+    reconstructed = tf.nn.tanh(tfkl.Conv1D(1, 1, name="conv_decoder_final")(x))
 
     return ConversionModel(wave_input, reconstructed,
                            gradient_clipping=config.training.gradient_clipping,
