@@ -17,7 +17,7 @@ features:
   sample_rate: 16000
 
 training:
-  batch_size: 128
+  batch_size: 16
   learning_rate: 0.0001
   weight_decay: 0.00003
   warmup_epochs: 1
