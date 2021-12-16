@@ -16,6 +16,8 @@ class ConversionModel(tf.keras.Model):
         self.content_model = content_model
         self.gradient_clipping = gradient_clipping
 
+        self.content_model.trainable = False
+
     def train_step(self, data):
         audio, audio_length, _, _ = data
 
@@ -33,7 +35,7 @@ class ConversionModel(tf.keras.Model):
                     (tf.cast(audio_length, tf.float32) + 1) / self.content_model.hop_length),
                 tf.int32)
             # take into account stride of the model
-            audio_length = tf.cast(audio_length / 2, tf.int32)
+            audio_length = tf.cast(tf.math.ceil(audio_length / 2), tf.int32)
             mask = tf.sequence_mask(audio_length, dtype=tf.float32)[:, :, None]
 
             masked_mse = tf.reduce_sum(mask * logits_squared_error) / tf.reduce_sum(mask)
@@ -65,7 +67,7 @@ class ConversionModel(tf.keras.Model):
                              tf.float32) + 1) / self.content_model.hop_length),
                 tf.int32)
             # take into account stride of the model
-            audio_length = tf.cast(audio_length / 2, tf.int32)
+            audio_length = tf.cast(tf.math.ceil(audio_length / 2), tf.int32)
             mask = tf.sequence_mask(audio_length, dtype=tf.float32)[:, :, None]
 
             masked_mse = tf.reduce_sum(
@@ -117,8 +119,7 @@ def build_voice_conversion_model(config: DictConfig) -> tf.keras.Model:
     reconstructed = tf.nn.tanh(tfkl.Conv1D(1, 1, name="conv_decoder_final")(x))
 
     wav2letter = build_w2l_model(28, config)
-    wav2letter.load_weights(config.path.model + "ref.h5")
-    wav2letter.trainable = False
+    wav2letter.load_weights(config.path.model + "_ref.h5")
 
     return ConversionModel(wave_input, reconstructed,
                            content_model=wav2letter,
