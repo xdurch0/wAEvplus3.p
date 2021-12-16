@@ -10,7 +10,7 @@ def w2l_dataset_npy(config: DictConfig,
                     which_sets: Iterable[str],
                     vocab: Dict[str, int],
                     train: bool,
-                    normalize: bool) -> tf.data.Dataset:
+                    normalize: bool) -> Tuple[tf.data.Dataset, int]:
     """Builds a TF dataset for the preprocessed data.
 
     Parameters:
@@ -22,7 +22,7 @@ def w2l_dataset_npy(config: DictConfig,
         normalize: If True, normalize each input array to mean 0, std 1.
 
     Returns:
-        Dataset ready for consumption.
+        Dataset ready for consumption, and number of speakers.
 
     """
     print("Building dataset for {} set using file {}...".format(
@@ -45,9 +45,15 @@ def w2l_dataset_npy(config: DictConfig,
     ids, _, transcrs, subsets = zip(*lines_split)
     files = [os.path.join(config.path.array_dir, fid + ".npy") for fid in ids]
 
+    # process speaker ids.
+    # we get the speaker id and remap to [0, 1, ..., n_speakers].
+    speaker_ids = [full_id.split("-")[0] for full_id in ids]
+    unique_speakers = sorted(set(speaker_ids))
+    remap_ids = dict(zip(unique_speakers, range(len(unique_speakers))))
+
     def _to_arrays(fname, trans):
         return load_arrays_map_transcriptions(
-            fname, trans, vocab, normalize)
+            fname, trans, vocab, remap_ids, normalize)
 
     def gen():  # dummy to be able to use from_generator
         for file_name, transcr in zip(files, transcrs):
@@ -62,7 +68,7 @@ def w2l_dataset_npy(config: DictConfig,
         # this basically shuffles the full dataset (~256k)
         data = data.shuffle(buffer_size=2**18).repeat()
 
-    output_types = [tf.float32, tf.int32, tf.int32, tf.int32]
+    output_types = [tf.float32, tf.int32, tf.int32, tf.int32, tf.int32]
     data = data.map(
         lambda file_id, transcription: tuple(tf.numpy_function(
             _to_arrays, [file_id, transcription], output_types)),
@@ -71,22 +77,24 @@ def w2l_dataset_npy(config: DictConfig,
     #         sequence lengths are always scalar)
     # NOTE 2: changing padding value of -1 for element 2 requires changes
     # in the model as well!
-    pad_shapes = ((-1, 1), (), (-1,), ())
-    pad_values = (0., 0, -1, 0)
+    pad_shapes = ((-1, 1), (), (-1,), (), ())
+    pad_values = (0., 0, -1, 0, 0)
     data = data.padded_batch(
         config.training.batch_size, padded_shapes=pad_shapes,
         padding_values=pad_values)
     # data = data.map(pack_inputs_in_dict, num_parallel_calls=tf.data.AUTOTUNE)
     data = data.prefetch(tf.data.AUTOTUNE)
 
-    return data
+    return data, len(remap_ids)
 
 
 def load_arrays_map_transcriptions(file_name: bytes,
                                    trans: bytes,
                                    vocab: Dict[str, int],
+                                   remap_ids: Dict[str, int],
                                    normalize: bool) -> Tuple[np.ndarray, int,
-                                                             np.ndarray, int]:
+                                                             np.ndarray, int,
+                                                             int]:
     """Mapping function to go from file names to numpy arrays.
 
     Goes from file_id, transcriptions to a tuple np_array, coded_transcriptions
@@ -97,6 +105,7 @@ def load_arrays_map_transcriptions(file_name: bytes,
                    file names. Expected to be utf-8 encoded as bytes.
         trans: Transcription. Also utf-8 bytes.
         vocab: Mapping of characters to integers.
+        remap_ids: Mapping of speaker IDs in the csv to range from 0 to n.
         normalize: If True, normalize the array to peak amplitude 1.
 
     Returns:
@@ -119,8 +128,12 @@ def load_arrays_map_transcriptions(file_name: bytes,
     if normalize:
         array /= np.max(abs(array))
 
+    _, file_id = os.path.split(file_name.decode("utf-8"))
+    speaker_id = file_id.split("-")[0]
+    remapped_id = remap_ids[speaker_id]
+
     return_vals = (array[:, None].astype(np.float32), audio_length,
-                   trans_mapped, transcription_length)
+                   trans_mapped, transcription_length, remapped_id)
 
     return return_vals
 
