@@ -25,7 +25,7 @@ def train_conversion(config: DictConfig):
     else:
         raise ValueError("Invalid subsets specified.")
 
-    train_dataset = w2l_dataset_npy(
+    train_dataset, n_speakers = w2l_dataset_npy(
         config,
         train_subsets,
         char_to_ind,
@@ -39,7 +39,8 @@ def train_conversion(config: DictConfig):
         train=False,
         normalize=False)
 
-    conversion_model = build_voice_conversion_model(config)
+    conversion_model = build_voice_conversion_model(
+        config, n_speakers=n_speakers)
 
     lr_schedule = CosineDecayWarmup(
         peak_learning_rate=config.training.learning_rate,
@@ -50,6 +51,10 @@ def train_conversion(config: DictConfig):
         learning_rate=lr_schedule)
 
     conversion_model.compile(optimizer=optimizer, run_eagerly=True)
+    # TODO kinda bad to put that herew
+    conversion_model.speaker_optimizer = tfa.optimizers.AdamW(
+        weight_decay=config.training.weight_decay,
+        learning_rate=lr_schedule)
 
     time_string = str(datetime.now())
     tb_logdir = os.path.join(config.path.logs + "_conversion",
@@ -65,6 +70,9 @@ def train_conversion(config: DictConfig):
         verbose=1)
     callbacks = [callback_tensorboard, callback_stop, callback_checkpoint,
                  tf.keras.callbacks.TerminateOnNaN()]
+
+    print(conversion_model.summary())
+    print(conversion_model.speaker_classification_model.summary())
 
     history = conversion_model.fit(
         train_dataset,

@@ -130,7 +130,7 @@ def load_arrays_map_transcriptions(file_name: bytes,
 
     _, file_id = os.path.split(file_name.decode("utf-8"))
     speaker_id = file_id.split("-")[0]
-    remapped_id = remap_ids[speaker_id]
+    remapped_id = np.int32(remap_ids[speaker_id])
 
     return_vals = (array[:, None].astype(np.float32), audio_length,
                    trans_mapped, transcription_length, remapped_id)
