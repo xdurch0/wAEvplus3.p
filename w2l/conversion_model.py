@@ -46,7 +46,7 @@ class ConversionModel(tf.keras.Model):
         # variables for the conversion model... so we have to exclude them
         # here manually. I would suppose that there is a better way...
         conversion_variables = [variable for variable in self.trainable_variables
-                                if variable not in self.speaker_classification_model.trainable_variables]
+                                if not variable.name.startswith("CLASS")]
         with tf.GradientTape(watch_accessed_variables=False) as tape:
             for variable in conversion_variables:
                 tape.watch(variable)
@@ -172,17 +172,17 @@ def build_speaker_classifier(config, n_speakers):
 
     x = LogMel(config.features.mel_freqs, config.features.window_size,
                config.features.hop_length, config.features.sample_rate,
-               trainable=False, name="log_mel")(wave_input)
-    x = tfkl.BatchNormalization(name="input_batchnorm", scale=False)(x)
+               trainable=False, name="CLASSlog_mel")(wave_input)
+    x = tfkl.BatchNormalization(name="CLASSinput_batchnorm", scale=False)(x)
 
     for ind, (n_filters, width, stride) in enumerate(layer_params):
         layer_string = "_layer_" + str(ind)
         x = tfkl.Conv1D(n_filters, width, strides=stride, padding="same",
-                        use_bias=False, name="conv" + layer_string)(x)
-        x = tfkl.BatchNormalization(name="bn" + layer_string, scale=False)(x)
-        x = tfkl.ReLU(name="activation" + layer_string)(x)
+                        use_bias=False, name="CLASSconv" + layer_string)(x)
+        x = tfkl.BatchNormalization(name="CLASSbn" + layer_string, scale=False)(x)
+        x = tfkl.ReLU(name="CLASSactivation" + layer_string)(x)
 
-    pooled = tfkl.GlobalAveragePooling1D()(x)
-    logits = tfkl.Dense(n_speakers, use_bias=True, name="logits")(pooled)
+    pooled = tfkl.GlobalAveragePooling1D(name="CLASSglobal_pool")(x)
+    logits = tfkl.Dense(n_speakers, use_bias=True, name="CLASSlogits")(pooled)
 
     return tf.keras.Model(wave_input, logits, name="speaker_classifier")
