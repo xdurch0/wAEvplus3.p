@@ -21,7 +21,6 @@ class ConversionModel(tf.keras.Model):
 
         self.gradient_clipping = gradient_clipping
 
-
     def train_step(self, data):
         audio, audio_length, _, _, speaker_id = data
 
@@ -42,7 +41,16 @@ class ConversionModel(tf.keras.Model):
 
         # train conversion model
         # TODO add confusion loss for speaker classifier
-        with tf.GradientTape() as tape:
+        # is this bad lol I dunno
+        # the thing is that the speaker classifier variables count as trainable
+        # variables for the conversion model... so we have to exclude them
+        # here manually. I would suppose that there is a better way...
+        conversion_variables = [variable for variable in self.trainable_variables
+                                if variable not in self.speaker_classification_model.trainable_variables]
+        with tf.GradientTape(watch_accessed_variables=False) as tape:
+            for variable in conversion_variables:
+                tape.watch(variable)
+
             reconstruction = self(audio, training=True)
 
             logits_target = self.content_model(audio, training=False)
@@ -62,10 +70,10 @@ class ConversionModel(tf.keras.Model):
             masked_mse = tf.reduce_sum(mask * logits_squared_error) / tf.reduce_sum(mask)
             loss = masked_mse
 
-        grads = tape.gradient(loss, self.trainable_variables)
+        grads = tape.gradient(loss, conversion_variables)
         grads, global_norm = tf.clip_by_global_norm(
             grads, self.gradient_clipping)
-        self.optimizer.apply_gradients(zip(grads, self.trainable_variables))
+        self.optimizer.apply_gradients(zip(grads, conversion_variables))
 
         self.loss_tracker.update_state(loss)
         self.speaker_loss_tracker.update_state(speaker_loss)
@@ -177,4 +185,4 @@ def build_speaker_classifier(config, n_speakers):
     pooled = tfkl.GlobalAveragePooling1D()(x)
     logits = tfkl.Dense(n_speakers, use_bias=True, name="logits")(pooled)
 
-    return tf.keras.Model(wave_input, logits)
+    return tf.keras.Model(wave_input, logits, name="speaker_classifier")
