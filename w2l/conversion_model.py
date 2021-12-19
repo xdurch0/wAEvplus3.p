@@ -14,6 +14,8 @@ class ConversionModel(tf.keras.Model):
         super().__init__(inputs, outputs, **kwargs)
         self.loss_tracker = tf.metrics.Mean(name="loss")
         self.speaker_loss_tracker = tf.metrics.Mean(name="speaker_loss")
+        self.speaker_accuracy_tracker = tf.metrics.SparseCategoricalAccuracy(
+            name="speaker_accuracy")
 
         self.content_model = content_model
         self.content_model.trainable = False
@@ -24,21 +26,6 @@ class ConversionModel(tf.keras.Model):
     def train_step(self, data):
         audio, audio_length, _, _, speaker_id = data
 
-        # train speaker classifier
-        # TODO change so it gets converted audio as input
-        with tf.GradientTape() as tape:
-            speaker_logits = self.speaker_classification_model(audio,
-                                                               training=True)
-            speaker_loss = tf.reduce_mean(
-                tf.nn.sparse_softmax_cross_entropy_with_logits(
-                    labels=speaker_id, logits=speaker_logits))
-
-        speaker_grads = tape.gradient(
-            speaker_loss, self.speaker_classification_model.trainable_variables)
-        self.speaker_optimizer.apply_gradients(
-            zip(speaker_grads,
-                self.speaker_classification_model.trainable_variables))
-
         # train conversion model
         # TODO add confusion loss for speaker classifier
         # is this bad lol I dunno
@@ -47,9 +34,9 @@ class ConversionModel(tf.keras.Model):
         # here manually. I would suppose that there is a better way...
         conversion_variables = [variable for variable in self.trainable_variables
                                 if not variable.name.startswith("CLASS")]
-        with tf.GradientTape(watch_accessed_variables=False) as tape:
+        with tf.GradientTape(watch_accessed_variables=False) as conversion_tape:
             for variable in conversion_variables:
-                tape.watch(variable)
+                conversion_tape.watch(variable)
 
             reconstruction = self(audio, training=True)
 
@@ -70,15 +57,31 @@ class ConversionModel(tf.keras.Model):
             masked_mse = tf.reduce_sum(mask * logits_squared_error) / tf.reduce_sum(mask)
             loss = masked_mse
 
-        grads = tape.gradient(loss, conversion_variables)
+        grads = conversion_tape.gradient(loss, conversion_variables)
         grads, global_norm = tf.clip_by_global_norm(
             grads, self.gradient_clipping)
         self.optimizer.apply_gradients(zip(grads, conversion_variables))
 
+        # train speaker classifier
+        with tf.GradientTape() as classifier_tape:
+            speaker_logits = self.speaker_classification_model(reconstruction,
+                                                               training=True)
+            speaker_loss = tf.reduce_mean(
+                tf.nn.sparse_softmax_cross_entropy_with_logits(
+                    labels=speaker_id, logits=speaker_logits))
+
+        speaker_grads = classifier_tape.gradient(
+            speaker_loss, self.speaker_classification_model.trainable_variables)
+        self.speaker_optimizer.apply_gradients(
+            zip(speaker_grads,
+                self.speaker_classification_model.trainable_variables))
+
         self.loss_tracker.update_state(loss)
         self.speaker_loss_tracker.update_state(speaker_loss)
+        self.speaker_accuracy_tracker(speaker_logits, speaker_id)
         return {"loss": self.loss_tracker.result(),
-                "speaker_loss": self.speaker_loss_tracker.result()}
+                "speaker_loss": self.speaker_loss_tracker.result(),
+                "speaker_accuracy": self.speaker_accuracy_tracker.result()}
 
     def test_step(self, data):
         # NOTE this only tests the content loss, not the speaker classification.

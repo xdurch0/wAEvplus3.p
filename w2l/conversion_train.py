@@ -32,7 +32,7 @@ def train_conversion(config: DictConfig):
         train=True,
         normalize=False)
 
-    val_dataset = w2l_dataset_npy(
+    val_dataset, _ = w2l_dataset_npy(
         config,
         val_subsets,
         char_to_ind,
