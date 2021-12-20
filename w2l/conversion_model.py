@@ -16,6 +16,9 @@ class ConversionModel(tf.keras.Model):
         self.speaker_loss_tracker = tf.metrics.Mean(name="speaker_loss")
         self.speaker_accuracy_tracker = tf.metrics.SparseCategoricalAccuracy(
             name="speaker_accuracy")
+        self.topk_speaker_accuracy_tracker = tf.metrics.SparseTopKCategoricalAccuracy(
+            5, name="top5_speaker_accuracy")
+        self.speaker_confusion_tracker = tf.metrics.Mean(name="confusion_loss")
 
         self.content_model = content_model
         self.content_model.trainable = False
@@ -27,7 +30,6 @@ class ConversionModel(tf.keras.Model):
         audio, audio_length, _, _, speaker_id = data
 
         # train conversion model
-        # TODO add confusion loss for speaker classifier
         # is this bad lol I dunno
         # the thing is that the speaker classifier variables count as trainable
         # variables for the conversion model... so we have to exclude them
@@ -55,7 +57,20 @@ class ConversionModel(tf.keras.Model):
             mask = tf.sequence_mask(audio_length, dtype=tf.float32)[:, :, None]
 
             masked_mse = tf.reduce_sum(mask * logits_squared_error) / tf.reduce_sum(mask)
-            loss = masked_mse
+
+            # confusion loss
+            # dunno if this is good? basically we want to maximize entropy
+            # but I'm scared of numerical issues with log!
+            # so I optimize the loss between output distribution and a uniform
+            # target distribution. might be the same mathematically??
+            speaker_logits = self.speaker_classification_model(reconstruction,
+                                                               training=True)
+            uniform_targets = tf.ones_like(speaker_logits) / tf.cast(tf.shape(speaker_logits)[-1], tf.float32)
+            speaker_confusion_loss = tf.reduce_mean(
+                tf.nn.softmax_cross_entropy_with_logits(
+                    labels=uniform_targets, logits=speaker_logits))
+
+            loss = masked_mse + speaker_confusion_loss
 
         grads = conversion_tape.gradient(loss, conversion_variables)
         grads, global_norm = tf.clip_by_global_norm(
@@ -79,9 +94,14 @@ class ConversionModel(tf.keras.Model):
         self.loss_tracker.update_state(loss)
         self.speaker_loss_tracker.update_state(speaker_loss)
         self.speaker_accuracy_tracker(speaker_logits, speaker_id)
+        self.topk_speaker_accuracy_tracker(speaker_logits, speaker_id)
+        self.speaker_confusion_tracker.update_state(speaker_confusion_loss)
+
         return {"loss": self.loss_tracker.result(),
                 "speaker_loss": self.speaker_loss_tracker.result(),
-                "speaker_accuracy": self.speaker_accuracy_tracker.result()}
+                "speaker_accuracy": self.speaker_accuracy_tracker.result(),
+                "speaker_top5_accuracy": self.topk_speaker_accuracy_tracker.result(),
+                "speaker_confusion": self.speaker_confusion_tracker.result()}
 
     def test_step(self, data):
         # NOTE this only tests the content loss, not the speaker classification.
@@ -115,7 +135,11 @@ class ConversionModel(tf.keras.Model):
 
     @property
     def metrics(self):
-        return [self.loss_tracker, self.speaker_loss_tracker]
+        return [self.loss_tracker,
+                self.speaker_loss_tracker,
+                self.speaker_accuracy_tracker,
+                self.topk_speaker_accuracy_tracker,
+                self.speaker_confusion_tracker]
 
 
 def build_voice_conversion_model(config: DictConfig,
