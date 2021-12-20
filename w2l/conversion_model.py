@@ -63,14 +63,19 @@ class ConversionModel(tf.keras.Model):
             # but I'm scared of numerical issues with log!
             # so I optimize the loss between output distribution and a uniform
             # target distribution. might be the same mathematically??
-            speaker_logits = self.speaker_classification_model(reconstruction,
-                                                               training=True)
-            uniform_targets = tf.ones_like(speaker_logits) / tf.cast(tf.shape(speaker_logits)[-1], tf.float32)
-            speaker_confusion_loss = tf.reduce_mean(
-                tf.nn.softmax_cross_entropy_with_logits(
-                    labels=uniform_targets, logits=speaker_logits))
 
-            loss = masked_mse + speaker_confusion_loss
+            # DIFFERENT IDEA
+            # cross-entropy with targets = softmax(logits) is just entropy
+            # maximizing entropy -> uniform distribution.
+            # so use negative entropy as loss!
+            speaker_logits = self.speaker_classification_model(reconstruction,
+                                                               training=False)
+            speaker_probabilities = tf.nn.softmax(speaker_logits)
+            speaker_entropy = tf.reduce_mean(
+                tf.nn.softmax_cross_entropy_with_logits(
+                    labels=speaker_probabilities, logits=speaker_logits))
+
+            loss = masked_mse - speaker_entropy
 
         grads = conversion_tape.gradient(loss, conversion_variables)
         grads, global_norm = tf.clip_by_global_norm(
@@ -91,13 +96,13 @@ class ConversionModel(tf.keras.Model):
             zip(speaker_grads,
                 self.speaker_classification_model.trainable_variables))
 
-        self.loss_tracker.update_state(loss)
+        self.loss_tracker.update_state(masked_mse)
         self.speaker_loss_tracker.update_state(speaker_loss)
         self.speaker_accuracy_tracker(speaker_id, speaker_logits)
         self.topk_speaker_accuracy_tracker(speaker_id, speaker_logits)
-        self.speaker_confusion_tracker.update_state(speaker_confusion_loss)
+        self.speaker_confusion_tracker.update_state(speaker_entropy)
 
-        return {"loss": self.loss_tracker.result(),
+        return {"reconstruction_loss": self.loss_tracker.result(),
                 "speaker_loss": self.speaker_loss_tracker.result(),
                 "speaker_accuracy": self.speaker_accuracy_tracker.result(),
                 "speaker_top5_accuracy": self.topk_speaker_accuracy_tracker.result(),
