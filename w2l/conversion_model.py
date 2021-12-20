@@ -93,8 +93,8 @@ class ConversionModel(tf.keras.Model):
 
         self.loss_tracker.update_state(loss)
         self.speaker_loss_tracker.update_state(speaker_loss)
-        self.speaker_accuracy_tracker(speaker_logits, speaker_id)
-        self.topk_speaker_accuracy_tracker(speaker_logits, speaker_id)
+        self.speaker_accuracy_tracker(speaker_id, speaker_logits)
+        self.topk_speaker_accuracy_tracker(speaker_id, speaker_logits)
         self.speaker_confusion_tracker.update_state(speaker_confusion_loss)
 
         return {"loss": self.loss_tracker.result(),
