@@ -28,9 +28,11 @@ class ConversionModel(tf.keras.Model):
     def train_step(self, data):
         audio, audio_length, _, _, speaker_id = data
 
+        logits = self.content_model(audio)
+
         # train speaker classifier
         with tf.GradientTape() as classifier_tape:
-            speaker_logits = self.speaker_classification_model(audio,
+            speaker_logits = self.speaker_classification_model(logits,
                                                                training=True)
             speaker_loss = tf.reduce_mean(
                 tf.nn.sparse_softmax_cross_entropy_with_logits(
