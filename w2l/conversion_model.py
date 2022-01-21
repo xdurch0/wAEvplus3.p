@@ -117,14 +117,12 @@ def build_voice_conversion_model(config: DictConfig,
 
 
 def build_speaker_classifier(config, n_speakers):
-    wave_input = tf.keras.Input((None, 1))
+    wave_input = tf.keras.Input((None, 29))
 
     layer_params = [(256, 48, 2)] + [(256, 7, 1), (256, 7, 2)] * 4 \
                    + [(2048, 7, 1), (2048, 1, 1)]
 
-    x = LogMel(config.features.mel_freqs, config.features.window_size,
-               config.features.hop_length, config.features.sample_rate,
-               trainable=False, name="CLASSlog_mel")(wave_input)
+    x = wave_input
     x = tfkl.BatchNormalization(name="CLASSinput_batchnorm", scale=False)(x)
 
     for ind, (n_filters, width, stride) in enumerate(layer_params):
