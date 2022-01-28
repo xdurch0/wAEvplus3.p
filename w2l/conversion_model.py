@@ -28,7 +28,7 @@ class ConversionModel(tf.keras.Model):
     def train_step(self, data):
         audio, audio_length, _, _, speaker_id = data
 
-        logits = self.content_model(audio)
+        logits = self.content_model(audio, training=False)
 
         # train speaker classifier
         with tf.GradientTape() as classifier_tape:
@@ -54,10 +54,25 @@ class ConversionModel(tf.keras.Model):
                 "speaker_top5_accuracy": self.topk_speaker_accuracy_tracker.result()}
 
     def test_step(self, data):
-        loss = tf.convert_to_tensor(0.)
+        audio, audio_length, _, _, speaker_id = data
 
-        self.loss_tracker.update_state(loss)
-        return {"loss": self.loss_tracker.result()}
+        logits = self.content_model(audio, training=False)
+
+        # train speaker classifier
+        speaker_logits = self.speaker_classification_model(logits,
+                                                           training=True)
+        speaker_loss = tf.reduce_mean(
+            tf.nn.sparse_softmax_cross_entropy_with_logits(
+                labels=speaker_id, logits=speaker_logits))
+
+        self.speaker_loss_tracker.update_state(speaker_loss)
+        self.speaker_accuracy_tracker(speaker_id, speaker_logits)
+        self.topk_speaker_accuracy_tracker(speaker_id, speaker_logits)
+
+        return {
+                "speaker_loss": self.speaker_loss_tracker.result(),
+                "speaker_accuracy": self.speaker_accuracy_tracker.result(),
+                "speaker_top5_accuracy": self.topk_speaker_accuracy_tracker.result()}
 
     @property
     def metrics(self):
@@ -117,12 +132,19 @@ def build_voice_conversion_model(config: DictConfig,
 
 
 def build_speaker_classifier(config, n_speakers):
-    wave_input = tf.keras.Input((None, 29))
+    wave_input = tf.keras.Input((None, 29))  # change to 1 for audio input!
 
     layer_params = [(256, 48, 2)] + [(256, 7, 1), (256, 7, 2)] * 4 \
                    + [(2048, 7, 1), (2048, 1, 1)]
+    #layer_params = [(256, 48, 2)]
 
     x = wave_input
+
+    # use this for audio input!
+    #x = LogMel(config.features.mel_freqs, config.features.window_size,
+    #           config.features.hop_length, config.features.sample_rate,
+    #           trainable=False, name="CLASSlog_mel")(wave_input)
+
     x = tfkl.BatchNormalization(name="CLASSinput_batchnorm", scale=False)(x)
 
     for ind, (n_filters, width, stride) in enumerate(layer_params):

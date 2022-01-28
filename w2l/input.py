@@ -1,5 +1,5 @@
 import os
-from typing import Iterable, Dict, Tuple
+from typing import Iterable, Dict, Tuple, Optional
 
 import numpy as np
 import tensorflow as tf
@@ -10,7 +10,8 @@ def w2l_dataset_npy(config: DictConfig,
                     which_sets: Iterable[str],
                     vocab: Dict[str, int],
                     train: bool,
-                    normalize: bool) -> Tuple[tf.data.Dataset, int]:
+                    normalize: bool,
+                    remap_ids: Optional[Dict] = None) -> Tuple[tf.data.Dataset, Dict]:
     """Builds a TF dataset for the preprocessed data.
 
     Parameters:
@@ -41,15 +42,25 @@ def w2l_dataset_npy(config: DictConfig,
                          "'{}'.".format(which_sets))
     print("\t{} entries remaining.".format(len(lines_split)))
 
+    print("\tDoing random split...")
+    np.random.seed(33)
+    take_lines = np.random.rand(len(lines_split))
+    if train:
+        lines_split = [line for ind, line in enumerate(lines_split) if take_lines[ind] <= 0.8]
+    else:
+        lines_split = [line for ind, line in enumerate(lines_split) if take_lines[ind] > 0.8]
+
+    print("\t{} entries remaining.".format(len(lines_split)))
+
     print("\tCreating the dataset...")
     ids, _, transcrs, subsets = zip(*lines_split)
     files = [os.path.join(config.path.array_dir, fid + ".npy") for fid in ids]
-
-    # process speaker ids.
-    # we get the speaker id and remap to [0, 1, ..., n_speakers].
-    speaker_ids = [full_id.split("-")[0] for full_id in ids]
-    unique_speakers = sorted(set(speaker_ids))
-    remap_ids = dict(zip(unique_speakers, range(len(unique_speakers))))
+    if remap_ids is None:
+        # process speaker ids.
+        # we get the speaker id and remap to [0, 1, ..., n_speakers].
+        speaker_ids = [full_id.split("-")[0] for full_id in ids]
+        unique_speakers = sorted(set(speaker_ids))
+        remap_ids = dict(zip(unique_speakers, range(len(unique_speakers))))
 
     def _to_arrays(fname, trans):
         return load_arrays_map_transcriptions(
@@ -85,7 +96,7 @@ def w2l_dataset_npy(config: DictConfig,
     # data = data.map(pack_inputs_in_dict, num_parallel_calls=tf.data.AUTOTUNE)
     data = data.prefetch(tf.data.AUTOTUNE)
 
-    return data, len(remap_ids)
+    return data, remap_ids
 
 
 def load_arrays_map_transcriptions(file_name: bytes,

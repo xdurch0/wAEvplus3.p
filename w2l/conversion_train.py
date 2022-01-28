@@ -22,10 +22,12 @@ def train_conversion(config: DictConfig):
     elif config.training.subsets == "small":
         train_subsets = ["train-clean-100", "train-clean-360"]
         val_subsets = ["dev-clean"]
+        train_subsets = train_subsets + val_subsets
+        val_subsets = train_subsets
     else:
         raise ValueError("Invalid subsets specified.")
 
-    train_dataset, n_speakers = w2l_dataset_npy(
+    train_dataset, speaker_ids = w2l_dataset_npy(
         config,
         train_subsets,
         char_to_ind,
@@ -37,7 +39,10 @@ def train_conversion(config: DictConfig):
         val_subsets,
         char_to_ind,
         train=False,
-        normalize=False)
+        normalize=False,
+        remap_ids=speaker_ids)
+
+    n_speakers = len(speaker_ids)
 
     conversion_model = build_voice_conversion_model(
         config, n_speakers=n_speakers)
@@ -65,7 +70,7 @@ def train_conversion(config: DictConfig):
         log_dir=tb_logdir, profile_batch=0)
     callback_stop = tf.keras.callbacks.EarlyStopping(
         patience=20000 // config.training.steps_per_epoch, verbose=1,
-        monitor="speaker_loss", mode="min")
+        monitor="val_speaker_loss", mode="min")
     callback_checkpoint = tf.keras.callbacks.ModelCheckpoint(
         model_path, save_best_only=True, save_weights_only=True,
         verbose=1)
