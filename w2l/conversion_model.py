@@ -59,21 +59,18 @@ class ConversionModel(tf.keras.Model):
             masked_mse = tf.reduce_sum(mask * logits_squared_error) / tf.reduce_sum(mask)
 
             # confusion loss
-            # dunno if this is good? basically we want to maximize entropy
-            # but I'm scared of numerical issues with log!
-            # so I optimize the loss between output distribution and a uniform
-            # target distribution. might be the same mathematically??
-
-            # DIFFERENT IDEA
+            # DIFFERENT IDEA could be:
             # cross-entropy with targets = softmax(logits) is just entropy
             # maximizing entropy -> uniform distribution.
             # so use negative entropy as loss!
+            # to do this, use speaker_probabilities as label
+            # along with non-sparse cross-entropy
             speaker_logits = self.speaker_classification_model(reconstruction,
                                                                training=False)
-            speaker_probabilities = tf.nn.softmax(speaker_logits)
+            # speaker_probabilities = tf.nn.softmax(speaker_logits)
             speaker_entropy = tf.reduce_mean(
-                tf.nn.softmax_cross_entropy_with_logits(
-                    labels=speaker_probabilities, logits=speaker_logits))
+                tf.nn.sparse_softmax_cross_entropy_with_logits(
+                    labels=speaker_id, logits=speaker_logits))
 
             loss = masked_mse - speaker_entropy
 
@@ -159,16 +156,24 @@ def build_voice_conversion_model(config: DictConfig,
         layer_string = "_encoder_" + str(ind)
 
         encoder_outputs.append(x)
-        x = tfkl.Conv1D(n_filters, width, strides=stride, padding="same",
-                        use_bias=False, name="conv" + layer_string)(x)
+        x = tfkl.Conv1D(n_filters, width, strides=4, padding="same",
+                        use_bias=False, name="conv_stride" + layer_string)(x)
         x = tfkl.BatchNormalization(name="bn" + layer_string, scale=False)(x)
         x = tfkl.ReLU(name="activation" + layer_string)(x)
 
-        x = tfkl.MaxPool1D(4, padding="same", name="pool" + layer_string)(x)
+        x = tfkl.Conv1D(n_filters, width, strides=1, padding="same",
+                        use_bias=False, name="conv_stride" + layer_string)(x)
+        x = tfkl.BatchNormalization(name="bn" + layer_string, scale=False)(x)
+        x = tfkl.ReLU(name="activation" + layer_string)(x)
 
     decoder_params = [(128, 7, 1), (64, 7, 1), (32, 7, 1)]
     for ind, (n_filters, width, stride) in enumerate(decoder_params):
         layer_string = "_decoder_" + str(ind)
+
+        x = tfkl.Conv1D(n_filters, width, strides=stride, padding="same",
+                        use_bias=False, name="conv" + layer_string)(x)
+        x = tfkl.BatchNormalization(name="bn" + layer_string, scale=False)(x)
+        x = tfkl.ReLU(name="activation" + layer_string)(x)
 
         x = tfkl.UpSampling1D(4, name="upsample" + layer_string)(x)
         x = tfkl.Concatenate(name="concatenate" + layer_string)(
@@ -199,8 +204,7 @@ def build_voice_conversion_model(config: DictConfig,
 def build_speaker_classifier(config, n_speakers):
     wave_input = tf.keras.Input((None, 1))
 
-    layer_params = [(256, 48, 2)] + [(256, 7, 1), (256, 7, 2)] * 4 \
-                   + [(2048, 7, 1), (2048, 1, 1)]
+    layer_params = [(256, 48, 2)] + [(256, 7, 1), (256, 7, 2)] * 2 + [(1024, 1, 1)]
 
     x = LogMel(config.features.mel_freqs, config.features.window_size,
                config.features.hop_length, config.features.sample_rate,
