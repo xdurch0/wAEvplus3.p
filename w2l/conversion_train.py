@@ -46,8 +46,12 @@ def train_conversion(config: DictConfig):
         peak_learning_rate=config.training.learning_rate,
         warmup_steps=config.training.warmup_epochs*config.training.steps_per_epoch,
         decay_steps=(config.training.epochs - config.training.warmup_epochs)*config.training.steps_per_epoch)
+    wd_schedule = CosineDecayWarmup(
+        peak_learning_rate=config.training.weight_decay,
+        warmup_steps=config.training.warmup_epochs*config.training.steps_per_epoch,
+        decay_steps=(config.training.epochs - config.training.warmup_epochs)*config.training.steps_per_epoch)
     optimizer = tfa.optimizers.AdamW(
-        weight_decay=config.training.weight_decay,
+        weight_decay=wd_schedule,
         learning_rate=lr_schedule)
 
     conversion_model.compile(optimizer=optimizer, run_eagerly=True)
