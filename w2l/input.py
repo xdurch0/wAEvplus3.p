@@ -116,9 +116,12 @@ def load_arrays_map_transcriptions(file_name: bytes,
     array = np.load(file_name.decode("utf-8"))
     # temporary hack for the reconstruction thing: pad arrays so that they
     # are divisible by 256
-    remainder = len(array) % 256
+    thing_to_test = len(array) - 512 + 5*128  # trust me
+    divisible_by = 128 * 16  # I said TRUST ME
+
+    remainder = thing_to_test % divisible_by
     if remainder:
-        array = np.pad(array, ((0, 256 - remainder),))
+        array = np.pad(array, ((0, divisible_by - remainder),))
 
     trans_mapped = np.array([vocab[ch] for ch in trans.decode("utf-8")],
                             dtype=np.int32)

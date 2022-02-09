@@ -29,6 +29,7 @@ class ConversionModel(tf.keras.Model):
         # OH NO IT'S HARD-CODED!!!
         self.logmel = LogMel(n_mels=128, n_fft=512, hop_len=128, sr=16000,
                              trainable=False, name="log_mel")
+        self.logmel.build((None, None, 1))
 
     def train_step(self, data):
         audio, audio_length, _, _, speaker_id = data
@@ -194,7 +195,7 @@ def build_voice_conversion_model(config: DictConfig,
     x = tfkl.UpSampling2D(2, name="upsample_decoder_final")(x)
     x = tfkl.Concatenate(name="concatenate_decoder_final")(
         [x, encoder_outputs[0]])
-    reconstructed = tf.nn.tanh(tfkl.Conv2D(1, 1, name="conv_decoder_final")(x))
+    reconstructed = tfkl.Conv2D(1, 1, name="conv_decoder_final")(x)
     reconstructed_no_channel = reconstructed[..., 0]
 
     wav2letter = build_w2l_model(28, config)
@@ -202,7 +203,7 @@ def build_voice_conversion_model(config: DictConfig,
 
     # XXX changed to accept logmel input directly
     xwav = logmel_input
-    for layer in wav2letter.layers:
+    for layer in wav2letter.layers[2:]:
         xwav = layer(xwav)
     wav2letter_logmel = tf.keras.Model(logmel_input, xwav)
     wav2letter_logmel.hop_length = wav2letter.hop_length
