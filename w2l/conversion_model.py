@@ -68,11 +68,11 @@ class ConversionModel(tf.keras.Model):
             speaker_logits = self.speaker_classification_model(reconstruction,
                                                                training=False)
             # speaker_probabilities = tf.nn.softmax(speaker_logits)
-            speaker_entropy = tf.reduce_mean(
+            speaker_confusion = tf.reduce_mean(
                 tf.nn.sparse_softmax_cross_entropy_with_logits(
                     labels=speaker_id, logits=speaker_logits))
 
-            loss = masked_mse - speaker_entropy
+            loss = masked_mse - speaker_confusion
 
         grads = conversion_tape.gradient(loss, conversion_variables)
         grads, global_norm = tf.clip_by_global_norm(
@@ -97,7 +97,7 @@ class ConversionModel(tf.keras.Model):
         self.speaker_loss_tracker.update_state(speaker_loss)
         self.speaker_accuracy_tracker(speaker_id, speaker_logits)
         self.topk_speaker_accuracy_tracker(speaker_id, speaker_logits)
-        self.speaker_confusion_tracker.update_state(speaker_entropy)
+        self.speaker_confusion_tracker.update_state(speaker_confusion)
 
         return {"reconstruction_loss": self.loss_tracker.result(),
                 "speaker_loss": self.speaker_loss_tracker.result(),
@@ -158,31 +158,31 @@ def build_voice_conversion_model(config: DictConfig,
         encoder_outputs.append(x)
         x = tfkl.Conv1D(n_filters, width, strides=4, padding="same",
                         use_bias=False, name="conv_stride" + layer_string)(x)
-        x = tfkl.BatchNormalization(name="bn" + layer_string, scale=False)(x)
-        x = tfkl.ReLU(name="activation" + layer_string)(x)
+        x = tfkl.BatchNormalization(name="bn1" + layer_string, scale=False)(x)
+        x = tfkl.ReLU(name="activation1" + layer_string)(x)
 
         x = tfkl.Conv1D(n_filters, width, strides=1, padding="same",
-                        use_bias=False, name="conv_stride" + layer_string)(x)
-        x = tfkl.BatchNormalization(name="bn" + layer_string, scale=False)(x)
-        x = tfkl.ReLU(name="activation" + layer_string)(x)
+                        use_bias=False, name="conv2" + layer_string)(x)
+        x = tfkl.BatchNormalization(name="bn2" + layer_string, scale=False)(x)
+        x = tfkl.ReLU(name="activation2" + layer_string)(x)
 
     decoder_params = [(128, 7, 1), (64, 7, 1), (32, 7, 1)]
     for ind, (n_filters, width, stride) in enumerate(decoder_params):
         layer_string = "_decoder_" + str(ind)
 
         x = tfkl.Conv1D(n_filters, width, strides=stride, padding="same",
-                        use_bias=False, name="conv" + layer_string)(x)
-        x = tfkl.BatchNormalization(name="bn" + layer_string, scale=False)(x)
-        x = tfkl.ReLU(name="activation" + layer_string)(x)
+                        use_bias=False, name="conv1" + layer_string)(x)
+        x = tfkl.BatchNormalization(name="bn1" + layer_string, scale=False)(x)
+        x = tfkl.ReLU(name="activation1" + layer_string)(x)
 
         x = tfkl.UpSampling1D(4, name="upsample" + layer_string)(x)
         x = tfkl.Concatenate(name="concatenate" + layer_string)(
             [x, encoder_outputs[-(ind + 1)]])
 
         x = tfkl.Conv1D(n_filters, width, strides=stride, padding="same",
-                        use_bias=False, name="conv" + layer_string)(x)
-        x = tfkl.BatchNormalization(name="bn" + layer_string, scale=False)(x)
-        x = tfkl.ReLU(name="activation" + layer_string)(x)
+                        use_bias=False, name="conv2" + layer_string)(x)
+        x = tfkl.BatchNormalization(name="bn2" + layer_string, scale=False)(x)
+        x = tfkl.ReLU(name="activation2" + layer_string)(x)
 
     x = tfkl.UpSampling1D(4, name="upsample_decoder_final")(x)
     x = tfkl.Concatenate(name="concatenate_decoder_final")(

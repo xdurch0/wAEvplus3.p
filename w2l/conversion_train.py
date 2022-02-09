@@ -57,7 +57,7 @@ def train_conversion(config: DictConfig):
     conversion_model.compile(optimizer=optimizer, run_eagerly=True)
     # TODO kinda bad to put that herew
     conversion_model.speaker_optimizer = tfa.optimizers.AdamW(
-        weight_decay=config.training.weight_decay,
+        weight_decay=wd_schedule,
         learning_rate=lr_schedule)
 
     time_string = str(datetime.now())
