@@ -26,8 +26,14 @@ class ConversionModel(tf.keras.Model):
 
         self.gradient_clipping = gradient_clipping
 
+        # OH NO IT'S HARD-CODED!!!
+        self.logmel = LogMel(n_mels=128, n_fft=512, hop_len=128, sr=16000,
+                             trainable=False, name="log_mel")
+
     def train_step(self, data):
         audio, audio_length, _, _, speaker_id = data
+
+        audio_spectrogram = self.logmel(audio)
 
         # train conversion model
         # is this bad lol I dunno
@@ -40,10 +46,10 @@ class ConversionModel(tf.keras.Model):
             for variable in conversion_variables:
                 conversion_tape.watch(variable)
 
-            reconstruction = self(audio, training=True)
+            reconstruction_spectrogram = self(audio_spectrogram, training=True)
 
-            logits_target = self.content_model(audio, training=False)
-            logits_recon = self.content_model(reconstruction, training=False)
+            logits_target = self.content_model(audio_spectrogram, training=False)
+            logits_recon = self.content_model(reconstruction_spectrogram, training=False)
 
             logits_squared_error = tf.math.squared_difference(logits_target,
                                                               logits_recon)
@@ -65,7 +71,7 @@ class ConversionModel(tf.keras.Model):
             # so use negative entropy as loss!
             # to do this, use speaker_probabilities as label
             # along with non-sparse cross-entropy
-            speaker_logits = self.speaker_classification_model(reconstruction,
+            speaker_logits = self.speaker_classification_model(reconstruction_spectrogram,
                                                                training=False)
             # speaker_probabilities = tf.nn.softmax(speaker_logits)
             speaker_confusion = tf.reduce_mean(
@@ -81,7 +87,7 @@ class ConversionModel(tf.keras.Model):
 
         # train speaker classifier
         with tf.GradientTape() as classifier_tape:
-            speaker_logits = self.speaker_classification_model(reconstruction,
+            speaker_logits = self.speaker_classification_model(reconstruction_spectrogram,
                                                                training=True)
             speaker_loss = tf.reduce_mean(
                 tf.nn.sparse_softmax_cross_entropy_with_logits(
@@ -109,12 +115,13 @@ class ConversionModel(tf.keras.Model):
         # NOTE this only tests the content loss, not the speaker classification.
         # this is because speakers are disjoint between training and test sets
         audio, audio_length, _, _, _ = data
+        audio_spectrogram = self.logmel(audio)
 
         with tf.GradientTape() as tape:
-            reconstruction = self(audio, training=False)
+            reconstruction_spectrogram = self(audio_spectrogram, training=False)
 
-            logits_target = self.content_model(audio, training=False)
-            logits_recon = self.content_model(reconstruction, training=False)
+            logits_target = self.content_model(audio_spectrogram, training=False)
+            logits_recon = self.content_model(reconstruction_spectrogram, training=False)
 
             logits_squared_error = tf.math.squared_difference(logits_target,
                                                               logits_recon)
@@ -146,70 +153,76 @@ class ConversionModel(tf.keras.Model):
 
 def build_voice_conversion_model(config: DictConfig,
                                  n_speakers: int) -> tf.keras.Model:
-    # encoder-decoder model with 1d convolutions :shrug:
-    wave_input = tf.keras.Input((None, 1))
+    # encoder-decoder model with 2d convolutions :shrug:
+    logmel_input = tf.keras.Input((None, config.features.mel_freqs))
+    x = logmel_input[..., None]  # add channel axis for 2d conv
 
-    encoder_params = [(32, 7, 1), (64, 7, 1), (128, 7, 1), (256, 7, 1)]
-    x = wave_input
+    encoder_params = [(16, 3, 1), (32, 3, 1), (64, 3, 1), (128, 3, 1)]
     encoder_outputs = []
     for ind, (n_filters, width, stride) in enumerate(encoder_params):
         layer_string = "_encoder_" + str(ind)
 
         encoder_outputs.append(x)
-        x = tfkl.Conv1D(n_filters, width, strides=4, padding="same",
+        x = tfkl.Conv2D(n_filters, width, strides=2, padding="same",
                         use_bias=False, name="conv_stride" + layer_string)(x)
         x = tfkl.BatchNormalization(name="bn1" + layer_string, scale=False)(x)
         x = tfkl.ReLU(name="activation1" + layer_string)(x)
 
-        x = tfkl.Conv1D(n_filters, width, strides=1, padding="same",
+        x = tfkl.Conv2D(n_filters, width, strides=1, padding="same",
                         use_bias=False, name="conv2" + layer_string)(x)
         x = tfkl.BatchNormalization(name="bn2" + layer_string, scale=False)(x)
         x = tfkl.ReLU(name="activation2" + layer_string)(x)
 
-    decoder_params = [(128, 7, 1), (64, 7, 1), (32, 7, 1)]
+    decoder_params = [(64, 3, 1), (32, 3, 1), (16, 3, 1)]
     for ind, (n_filters, width, stride) in enumerate(decoder_params):
         layer_string = "_decoder_" + str(ind)
 
-        x = tfkl.Conv1D(n_filters, width, strides=stride, padding="same",
+        x = tfkl.Conv2D(n_filters, width, strides=stride, padding="same",
                         use_bias=False, name="conv1" + layer_string)(x)
         x = tfkl.BatchNormalization(name="bn1" + layer_string, scale=False)(x)
         x = tfkl.ReLU(name="activation1" + layer_string)(x)
 
-        x = tfkl.UpSampling1D(4, name="upsample" + layer_string)(x)
+        x = tfkl.UpSampling2D(2, name="upsample" + layer_string)(x)
         x = tfkl.Concatenate(name="concatenate" + layer_string)(
             [x, encoder_outputs[-(ind + 1)]])
 
-        x = tfkl.Conv1D(n_filters, width, strides=stride, padding="same",
+        x = tfkl.Conv2D(n_filters, width, strides=stride, padding="same",
                         use_bias=False, name="conv2" + layer_string)(x)
         x = tfkl.BatchNormalization(name="bn2" + layer_string, scale=False)(x)
         x = tfkl.ReLU(name="activation2" + layer_string)(x)
 
-    x = tfkl.UpSampling1D(4, name="upsample_decoder_final")(x)
+    x = tfkl.UpSampling2D(2, name="upsample_decoder_final")(x)
     x = tfkl.Concatenate(name="concatenate_decoder_final")(
         [x, encoder_outputs[0]])
-    reconstructed = tf.nn.tanh(tfkl.Conv1D(1, 1, name="conv_decoder_final")(x))
+    reconstructed = tf.nn.tanh(tfkl.Conv2D(1, 1, name="conv_decoder_final")(x))
+    reconstructed_no_channel = reconstructed[..., 0]
 
     wav2letter = build_w2l_model(28, config)
     wav2letter.load_weights(config.path.model + "_ref.h5")
 
+    # XXX changed to accept logmel input directly
+    xwav = logmel_input
+    for layer in wav2letter.layers:
+        xwav = layer(xwav)
+    wav2letter_logmel = tf.keras.Model(logmel_input, xwav)
+    wav2letter_logmel.hop_length = wav2letter.hop_length
+
     speaker_classifier = build_speaker_classifier(config, n_speakers)
 
-    return ConversionModel(wave_input, reconstructed,
-                           content_model=wav2letter,
+    return ConversionModel(logmel_input, reconstructed_no_channel,
+                           content_model=wav2letter_logmel,
                            speaker_classification_model=speaker_classifier,
                            gradient_clipping=config.training.gradient_clipping,
                            name="voice_conversion")
 
 
 def build_speaker_classifier(config, n_speakers):
-    wave_input = tf.keras.Input((None, 1))
+    # XXX changed to accept logmel input directly
+    logmel_input = tf.keras.Input((None, config.features.mel_freqs))
 
     layer_params = [(256, 48, 2)] + [(256, 7, 1), (256, 7, 2)] * 2 + [(1024, 1, 1)]
 
-    x = LogMel(config.features.mel_freqs, config.features.window_size,
-               config.features.hop_length, config.features.sample_rate,
-               trainable=False, name="CLASSlog_mel")(wave_input)
-    x = tfkl.BatchNormalization(name="CLASSinput_batchnorm", scale=False)(x)
+    x = tfkl.BatchNormalization(name="CLASSinput_batchnorm", scale=False)(logmel_input)
 
     for ind, (n_filters, width, stride) in enumerate(layer_params):
         layer_string = "_layer_" + str(ind)
@@ -221,4 +234,4 @@ def build_speaker_classifier(config, n_speakers):
     pooled = tfkl.GlobalAveragePooling1D(name="CLASSglobal_pool")(x)
     logits = tfkl.Dense(n_speakers, use_bias=True, name="CLASSlogits")(pooled)
 
-    return tf.keras.Model(wave_input, logits, name="speaker_classifier")
+    return tf.keras.Model(logmel_input, logits, name="speaker_classifier")
