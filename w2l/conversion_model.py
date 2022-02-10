@@ -13,12 +13,19 @@ class ConversionModel(tf.keras.Model):
                  gradient_clipping, **kwargs):
         super().__init__(inputs, outputs, **kwargs)
         self.loss_tracker = tf.metrics.Mean(name="loss")
-        self.speaker_loss_tracker = tf.metrics.Mean(name="speaker_loss")
-        self.speaker_accuracy_tracker = tf.metrics.SparseCategoricalAccuracy(
-            name="speaker_accuracy")
-        self.topk_speaker_accuracy_tracker = tf.metrics.SparseTopKCategoricalAccuracy(
-            5, name="top5_speaker_accuracy")
         self.speaker_confusion_tracker = tf.metrics.Mean(name="confusion_loss")
+
+        self.speaker_loss_real_tracker = tf.metrics.Mean(name="speaker_loss_real")
+        self.speaker_accuracy__real_tracker = tf.metrics.SparseCategoricalAccuracy(
+            name="speaker_accuracy_real")
+        self.topk_speaker_accuracy_real_tracker = tf.metrics.SparseTopKCategoricalAccuracy(
+            5, name="top5_speaker_accuracy_real")
+
+        self.speaker_loss_converted_tracker = tf.metrics.Mean(name="speaker_loss_converted")
+        self.speaker_accuracy_converted_tracker = tf.metrics.SparseCategoricalAccuracy(
+            name="speaker_accuracy_converted")
+        self.topk_speaker_accuracy_converted_tracker = tf.metrics.SparseTopKCategoricalAccuracy(
+            5, name="top5_speaker_accuracy_converted")
 
         self.content_model = content_model
         self.content_model.trainable = False
@@ -88,29 +95,45 @@ class ConversionModel(tf.keras.Model):
 
         # train speaker classifier
         with tf.GradientTape() as classifier_tape:
-            speaker_logits = self.speaker_classification_model(reconstruction_spectrogram,
-                                                               training=True)
-            speaker_loss = tf.reduce_mean(
+            speaker_logits_converted = self.speaker_classification_model(reconstruction_spectrogram,
+                                                                         training=True)
+            speaker_loss_converted = tf.reduce_mean(
                 tf.nn.sparse_softmax_cross_entropy_with_logits(
-                    labels=speaker_id, logits=speaker_logits))
+                    labels=speaker_id, logits=speaker_logits_converted))
+
+            speaker_logits_real = self.speaker_classification_model(audio_spectrogram,
+                                                                    training=True)
+            speaker_loss_real = tf.reduce_mean(
+                tf.nn.sparse_softmax_cross_entropy_with_logits(
+                    labels=speaker_id, logits=speaker_logits_real))
+
+            speaker_loss_total = 0.5 * (speaker_loss_converted + speaker_loss_real)
 
         speaker_grads = classifier_tape.gradient(
-            speaker_loss, self.speaker_classification_model.trainable_variables)
+            speaker_loss_total, self.speaker_classification_model.trainable_variables)
         self.speaker_optimizer.apply_gradients(
             zip(speaker_grads,
                 self.speaker_classification_model.trainable_variables))
 
         self.loss_tracker.update_state(masked_mse)
-        self.speaker_loss_tracker.update_state(speaker_loss)
-        self.speaker_accuracy_tracker(speaker_id, speaker_logits)
-        self.topk_speaker_accuracy_tracker(speaker_id, speaker_logits)
         self.speaker_confusion_tracker.update_state(speaker_confusion)
 
+        self.speaker_loss_real_tracker.update_state(speaker_loss_real)
+        self.speaker_accuracy_real_tracker(speaker_id, speaker_logits_real)
+        self.topk_speaker_accuracy_real_tracker(speaker_id, speaker_logits_real)
+
+        self.speaker_loss_converted_tracker.update_state(speaker_loss_converted)
+        self.speaker_accuracy_converted_tracker(speaker_id, speaker_logits_converted)
+        self.topk_speaker_accuracy_converted_tracker(speaker_id, speaker_logits_converted)
+
         return {"reconstruction_loss": self.loss_tracker.result(),
-                "speaker_loss": self.speaker_loss_tracker.result(),
-                "speaker_accuracy": self.speaker_accuracy_tracker.result(),
-                "speaker_top5_accuracy": self.topk_speaker_accuracy_tracker.result(),
-                "speaker_confusion": self.speaker_confusion_tracker.result()}
+                "speaker_confusion": self.speaker_confusion_tracker.result(),
+                "speaker_loss_real": self.speaker_loss_real_tracker.result(),
+                "speaker_accuracy_real": self.speaker_accuracy_real_tracker.result(),
+                "speaker_top5_accuracy_real": self.topk_speaker_accuracy_real_tracker.result(),
+                "speaker_loss_converted": self.speaker_loss_converted_tracker.result(),
+                "speaker_accuracy_converted": self.speaker_accuracy_converted_tracker.result(),
+                "speaker_top5_accuracy_converted": self.topk_speaker_accuracy_converted_tracker.result()}
 
     def test_step(self, data):
         # NOTE this only tests the content loss, not the speaker classification.
