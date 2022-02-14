@@ -14,9 +14,13 @@ class ConversionModel(tf.keras.Model):
         super().__init__(inputs, outputs, **kwargs)
         self.loss_tracker = tf.metrics.Mean(name="loss")
         self.speaker_confusion_tracker = tf.metrics.Mean(name="confusion_loss")
+        self.speaker_accuracy_confusion_tracker = tf.metrics.SparseCategoricalAccuracy(
+            name="speaker_accuracy_confusion")
+        self.topk_speaker_accuracy_confusion_tracker = tf.metrics.SparseTopKCategoricalAccuracy(
+            5, name="top5_speaker_accuracy_confusion")
 
         self.speaker_loss_real_tracker = tf.metrics.Mean(name="speaker_loss_real")
-        self.speaker_accuracy__real_tracker = tf.metrics.SparseCategoricalAccuracy(
+        self.speaker_accuracy_real_tracker = tf.metrics.SparseCategoricalAccuracy(
             name="speaker_accuracy_real")
         self.topk_speaker_accuracy_real_tracker = tf.metrics.SparseTopKCategoricalAccuracy(
             5, name="top5_speaker_accuracy_real")
@@ -79,12 +83,12 @@ class ConversionModel(tf.keras.Model):
             # so use negative entropy as loss!
             # to do this, use speaker_probabilities as label
             # along with non-sparse cross-entropy
-            speaker_logits = self.speaker_classification_model(reconstruction_spectrogram,
-                                                               training=False)
-            # speaker_probabilities = tf.nn.softmax(speaker_logits)
+            speaker_logits_confusion = self.speaker_classification_model(
+                reconstruction_spectrogram, training=False)
+            # speaker_probabilities = tf.nn.softmax(speaker_logits_confusion)
             speaker_confusion = tf.reduce_mean(
                 tf.nn.sparse_softmax_cross_entropy_with_logits(
-                    labels=speaker_id, logits=speaker_logits))
+                    labels=speaker_id, logits=speaker_logits_confusion))
 
             loss = masked_mse - speaker_confusion
 
@@ -95,8 +99,8 @@ class ConversionModel(tf.keras.Model):
 
         # train speaker classifier
         with tf.GradientTape() as classifier_tape:
-            speaker_logits_converted = self.speaker_classification_model(reconstruction_spectrogram,
-                                                                         training=True)
+            speaker_logits_converted = self.speaker_classification_model(
+                reconstruction_spectrogram, training=True)
             speaker_loss_converted = tf.reduce_mean(
                 tf.nn.sparse_softmax_cross_entropy_with_logits(
                     labels=speaker_id, logits=speaker_logits_converted))
@@ -117,6 +121,8 @@ class ConversionModel(tf.keras.Model):
 
         self.loss_tracker.update_state(masked_mse)
         self.speaker_confusion_tracker.update_state(speaker_confusion)
+        self.speaker_accuracy_confusion_tracker(speaker_id, speaker_logits_confusion)
+        self.topk_speaker_accuracy_confusion_tracker(speaker_id, speaker_logits_confusion)
 
         self.speaker_loss_real_tracker.update_state(speaker_loss_real)
         self.speaker_accuracy_real_tracker(speaker_id, speaker_logits_real)
@@ -128,6 +134,8 @@ class ConversionModel(tf.keras.Model):
 
         return {"reconstruction_loss": self.loss_tracker.result(),
                 "speaker_confusion": self.speaker_confusion_tracker.result(),
+                "speaker_accuracy_confusion": self.speaker_accuracy_confusion_tracker.result(),
+                "speaker_top5_accuracy_confusion": self.topk_speaker_accuracy_confusion_tracker.result(),
                 "speaker_loss_real": self.speaker_loss_real_tracker.result(),
                 "speaker_accuracy_real": self.speaker_accuracy_real_tracker.result(),
                 "speaker_top5_accuracy_real": self.topk_speaker_accuracy_real_tracker.result(),
@@ -169,10 +177,15 @@ class ConversionModel(tf.keras.Model):
     @property
     def metrics(self):
         return [self.loss_tracker,
-                self.speaker_loss_tracker,
-                self.speaker_accuracy_tracker,
-                self.topk_speaker_accuracy_tracker,
-                self.speaker_confusion_tracker]
+                self.speaker_confusion_tracker,
+                self.speaker_accuracy_confusion_tracker,
+                self.topk_speaker_accuracy_confusion_tracker,
+                self.speaker_loss_real_tracker,
+                self.speaker_accuracy_real_tracker,
+                self.topk_speaker_accuracy_real_tracker,
+                self.speaker_loss_converted_tracker,
+                self.speaker_accuracy_converted_tracker,
+                self.topk_speaker_accuracy_converted_tracker]
 
 
 def build_voice_conversion_model(config: DictConfig,
