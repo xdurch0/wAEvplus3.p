@@ -160,8 +160,6 @@ class ConversionModel(tf.keras.Model):
             logits_target = self.content_model(audio_spectrogram, training=False)
             logits_recon = self.content_model(reconstruction_spectrogram, training=False)
 
-            logits_squared_error = tf.math.squared_difference(logits_target,
-                                                              logits_recon)
             # take into account mel transformation
             audio_length = tf.cast(
                 tf.math.ceil(
@@ -172,8 +170,13 @@ class ConversionModel(tf.keras.Model):
             audio_length = tf.cast(tf.math.ceil(audio_length / 2), tf.int32)
             mask = tf.sequence_mask(audio_length, dtype=tf.float32)[:, :, None]
 
-            masked_mse = tf.reduce_sum(
-                mask * logits_squared_error) / tf.reduce_sum(mask)
+            masked_mse = 0
+            for target_act, recon_act in zip(logits_target, logits_recon):
+                logits_squared_error = tf.math.squared_difference(target_act,
+                                                                  recon_act)
+
+                masked_mse += tf.reduce_sum(
+                    mask * logits_squared_error) / tf.reduce_sum(mask)
             loss = masked_mse
 
         self.loss_tracker.update_state(loss)
