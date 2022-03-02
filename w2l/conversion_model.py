@@ -85,7 +85,7 @@ class ConversionModel(tf.keras.Model):
             # along with non-sparse cross-entropy
             speaker_logits_confusion = self.speaker_classification_model(
                 reconstruction_spectrogram, training=False)
-            # speaker_probabilities = tf.nn.softmax(speaker_logits_confusion)
+            #speaker_probabilities = tf.nn.softmax(speaker_logits_confusion)
             speaker_confusion = tf.reduce_mean(
                 tf.nn.sparse_softmax_cross_entropy_with_logits(
                     labels=speaker_id, logits=speaker_logits_confusion))
@@ -194,7 +194,7 @@ def build_voice_conversion_model(config: DictConfig,
     logmel_input = tf.keras.Input((None, config.features.mel_freqs))
     x = logmel_input[..., None]  # add channel axis for 2d conv
 
-    encoder_params = [(16, 3, 1), (32, 3, 1), (64, 3, 1), (128, 3, 1)]
+    encoder_params = [(32, 3, 1), (64, 3, 1), (128, 3, 1), (256, 3, 1)]
     encoder_outputs = []
     for ind, (n_filters, width, stride) in enumerate(encoder_params):
         layer_string = "_encoder_" + str(ind)
@@ -210,7 +210,7 @@ def build_voice_conversion_model(config: DictConfig,
         x = tfkl.BatchNormalization(name="bn2" + layer_string, scale=False)(x)
         x = tfkl.ReLU(name="activation2" + layer_string)(x)
 
-    decoder_params = [(64, 3, 1), (32, 3, 1), (16, 3, 1)]
+    decoder_params = [(128, 3, 1), (64, 3, 1), (32, 3, 1)]
     for ind, (n_filters, width, stride) in enumerate(decoder_params):
         layer_string = "_decoder_" + str(ind)
 
@@ -259,13 +259,13 @@ def build_speaker_classifier(config, n_speakers):
 
     layer_params = [(256, 48, 2)] + [(256, 7, 1), (256, 7, 2)] * 2 + [(1024, 1, 1)]
 
-    x = tfkl.BatchNormalization(name="CLASSinput_batchnorm", scale=False)(logmel_input)
+    x = tfkl.LayerNormalization(name="CLASSinput_batchnorm", scale=True)(logmel_input)
 
     for ind, (n_filters, width, stride) in enumerate(layer_params):
         layer_string = "_layer_" + str(ind)
         x = tfkl.Conv1D(n_filters, width, strides=stride, padding="same",
                         use_bias=False, name="CLASSconv" + layer_string)(x)
-        x = tfkl.BatchNormalization(name="CLASSbn" + layer_string, scale=False)(x)
+        x = tfkl.LayerNormalization(name="CLASSbn" + layer_string, scale=True)(x)
         x = tfkl.ReLU(name="CLASSactivation" + layer_string)(x)
 
     pooled = tfkl.GlobalAveragePooling1D(name="CLASSglobal_pool")(x)
