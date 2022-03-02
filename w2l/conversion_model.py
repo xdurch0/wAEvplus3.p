@@ -63,18 +63,23 @@ class ConversionModel(tf.keras.Model):
             logits_target = self.content_model(audio_spectrogram, training=False)
             logits_recon = self.content_model(reconstruction_spectrogram, training=False)
 
-            logits_squared_error = tf.math.squared_difference(logits_target,
-                                                              logits_recon)
             # take into account mel transformation
             audio_length = tf.cast(
                 tf.math.ceil(
-                    (tf.cast(audio_length, tf.float32) + 1) / self.content_model.hop_length),
+                    (tf.cast(audio_length,
+                             tf.float32) + 1) / self.content_model.hop_length),
                 tf.int32)
             # take into account stride of the model
             audio_length = tf.cast(tf.math.ceil(audio_length / 2), tf.int32)
             mask = tf.sequence_mask(audio_length, dtype=tf.float32)[:, :, None]
 
-            masked_mse = tf.reduce_sum(mask * logits_squared_error) / tf.reduce_sum(mask)
+            masked_mse = 0
+            for target_act, recon_act in zip(logits_target, logits_recon):
+                logits_squared_error = tf.math.squared_difference(target_act,
+                                                                  recon_act)
+
+                masked_mse += tf.reduce_sum(mask * logits_squared_error) / tf.reduce_sum(mask)
+
 
             # confusion loss
             # DIFFERENT IDEA could be:
@@ -238,10 +243,15 @@ def build_voice_conversion_model(config: DictConfig,
     wav2letter.load_weights(config.path.model + "_ref.h5")
 
     # XXX changed to accept logmel input directly
+    # note we skip two layers -- 0 = input, 1 = logmel
     xwav = logmel_input
-    for layer in wav2letter.layers[2:]:
+    relu_layers = []
+    for ind, layer in enumerate(wav2letter.layers[2:]):
         xwav = layer(xwav)
-    wav2letter_logmel = tf.keras.Model(logmel_input, xwav)
+        if ind >= 3 and not ind % 3:
+            relu_layers.append(xwav)
+
+    wav2letter_logmel = tf.keras.Model(logmel_input, [xwav] + relu_layers[-1:])
     wav2letter_logmel.hop_length = wav2letter.hop_length
 
     speaker_classifier = build_speaker_classifier(config, n_speakers)

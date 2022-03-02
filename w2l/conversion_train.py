@@ -1,4 +1,5 @@
 import os
+import pickle
 from datetime import datetime
 
 import tensorflow as tf
@@ -85,3 +86,7 @@ def train_conversion(config: DictConfig):
         steps_per_epoch=config.training.steps_per_epoch,
         validation_steps=None,
         callbacks=callbacks)
+
+    with open(config.path.model + "_history_"
+              + time_string + ".pkl", "wb") as history_file:
+        pickle.dump(history, history_file)
