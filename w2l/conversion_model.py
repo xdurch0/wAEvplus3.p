@@ -35,7 +35,8 @@ class ConversionModel(tf.keras.Model):
         self.logmel.build((None, None, 1))
 
     def train_step(self, data):
-        source_audio, source_audio_length, _, _, _, target_audio, target_audio_length, _, _, _ = data
+        source_audio, source_audio_length, _, _, _ = data[0]
+        target_audio, target_audio_length, _, _, _ = data[1]
 
         source_spectrogram = self.logmel(source_audio)
         target_spectrogram = self.logmel(target_audio)
@@ -134,7 +135,8 @@ class ConversionModel(tf.keras.Model):
     def test_step(self, data):
         # NOTE this only tests the content loss, not the speaker classification.
         # this is because speakers are disjoint between training and test sets
-        source_audio, source_audio_length, _, _, _, target_audio, target_audio_length, _, _, _ = data
+        source_audio, source_audio_length, _, _, _ = data[0]
+        target_audio, target_audio_length, _, _, _ = data[1]
         audio_spectrogram = self.logmel(source_audio)
 
         with tf.GradientTape() as tape:

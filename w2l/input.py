@@ -79,7 +79,7 @@ def w2l_dataset_npy(config: DictConfig,
     if keep_id > 0:
         data = data.filter(lambda _aud, _len, _trans, _trlen, speaker_id: tf.math.equal(speaker_id, keep_id))
     elif keep_id < 0:
-        data = data.filter(lambda _aud, _len, _trans, _trlen, speaker_id: tf.math.not_equal(speaker_id, keep_id))
+        data = data.filter(lambda _aud, _len, _trans, _trlen, speaker_id: tf.math.not_equal(speaker_id, -keep_id))
     else:
         pass
 

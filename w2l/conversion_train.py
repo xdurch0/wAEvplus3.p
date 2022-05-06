@@ -40,7 +40,7 @@ def train_conversion(config: DictConfig):
         train=True,
         normalize=False,
         keep_id=-1)
-    train_dataset = tf.data.Dataset.zip((train_dataset1, train_dataset2))
+    train_dataset = tf.data.Dataset.zip((train_dataset2, train_dataset1))
 
     val_dataset = w2l_dataset_npy(
         config,
