@@ -10,7 +10,8 @@ def w2l_dataset_npy(config: DictConfig,
                     which_sets: Iterable[str],
                     vocab: Dict[str, int],
                     train: bool,
-                    normalize: bool) -> Tuple[tf.data.Dataset, int]:
+                    normalize: bool,
+                    keep_id: int) -> Tuple[tf.data.Dataset, int]:
     """Builds a TF dataset for the preprocessed data.
 
     Parameters:
@@ -73,6 +74,15 @@ def w2l_dataset_npy(config: DictConfig,
         lambda file_id, transcription: tuple(tf.numpy_function(
             _to_arrays, [file_id, transcription], output_types)),
         num_parallel_calls=tf.data.AUTOTUNE)
+
+    # we either keep only the utterances of a certain speaker, or everything but
+    if keep_id > 0:
+        data = data.filter(lambda _aud, _len, _trans, _trlen, speaker_id: tf.math.equal(speaker_id, keep_id))
+    elif keep_id < 0:
+        data = data.filter(lambda _aud, _len, _trans, _trlen, speaker_id: tf.math.not_equal(speaker_id, keep_id))
+    else:
+        pass
+
     # NOTE 1: padding value of 0 for element 1 and 3 is just a dummy (since
     #         sequence lengths are always scalar)
     # NOTE 2: changing padding value of -1 for element 2 requires changes
@@ -85,7 +95,7 @@ def w2l_dataset_npy(config: DictConfig,
     # data = data.map(pack_inputs_in_dict, num_parallel_calls=tf.data.AUTOTUNE)
     data = data.prefetch(tf.data.AUTOTUNE)
 
-    return data, len(remap_ids)
+    return data
 
 
 def load_arrays_map_transcriptions(file_name: bytes,

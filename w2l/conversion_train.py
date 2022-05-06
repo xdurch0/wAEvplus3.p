@@ -26,22 +26,32 @@ def train_conversion(config: DictConfig):
     else:
         raise ValueError("Invalid subsets specified.")
 
-    train_dataset, n_speakers = w2l_dataset_npy(
+    train_dataset1 = w2l_dataset_npy(
         config,
         train_subsets,
         char_to_ind,
         train=True,
-        normalize=False)
+        normalize=False,
+        keep_id=1)
+    train_dataset2 = w2l_dataset_npy(
+        config,
+        train_subsets,
+        char_to_ind,
+        train=True,
+        normalize=False,
+        keep_id=-1)
+    train_dataset = tf.data.Dataset.zip((train_dataset1, train_dataset2))
 
-    val_dataset, _ = w2l_dataset_npy(
+    val_dataset = w2l_dataset_npy(
         config,
         val_subsets,
         char_to_ind,
         train=False,
-        normalize=False)
+        normalize=False,
+        keep_id=0)
+    val_dataset = tf.data.Dataset.zip((val_dataset, val_dataset))
 
-    conversion_model = build_voice_conversion_model(
-        config, n_speakers=n_speakers)
+    conversion_model = build_voice_conversion_model(config)
 
     lr_schedule = CosineDecayWarmup(
         peak_learning_rate=config.training.learning_rate,
@@ -52,13 +62,13 @@ def train_conversion(config: DictConfig):
         warmup_steps=config.training.warmup_epochs*config.training.steps_per_epoch,
         decay_steps=(config.training.epochs - config.training.warmup_epochs)*config.training.steps_per_epoch)
     optimizer = tfa.optimizers.AdamW(
-        weight_decay=wd_schedule,
+        weight_decay=wd_schedule, beta_1=0.5,
         learning_rate=lr_schedule)
 
     conversion_model.compile(optimizer=optimizer, run_eagerly=True)
     # TODO kinda bad to put that herew
     conversion_model.speaker_optimizer = tfa.optimizers.AdamW(
-        weight_decay=wd_schedule,
+        weight_decay=wd_schedule, beta_1=0.5,
         learning_rate=lr_schedule)
 
     time_string = str(datetime.now())
