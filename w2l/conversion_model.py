@@ -112,10 +112,10 @@ class ConversionModel(tf.keras.Model):
                 tf.math.ceil(target_audio_length / 2), tf.int32)
 
             audio_lengths_target = [target_audio_length]*2
-            audio_length_discriminator = tf.cast(tf.math.ceil(target_audio_length / 2), tf.int32)
-            audio_lengths_target += [audio_length_discriminator]*2
-            audio_length_discriminator = tf.cast(tf.math.ceil(target_audio_length / 2), tf.int32)
-            audio_lengths_target += [audio_length_discriminator]*2
+            target_audio_length = tf.cast(tf.math.ceil(target_audio_length / 2), tf.int32)
+            audio_lengths_target += [target_audio_length]*2
+            target_audio_length = tf.cast(tf.math.ceil(target_audio_length / 2), tf.int32)
+            audio_lengths_target += [target_audio_length]*2
             discriminator_mask_target = tf.sequence_mask(target_audio_length,
                                                          dtype=tf.float32)[:, :, None]
 
