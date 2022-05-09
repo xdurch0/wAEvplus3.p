@@ -23,6 +23,8 @@ class ConversionModel(tf.keras.Model):
         self.speaker_accuracy_converted_tracker = tf.metrics.BinaryAccuracy(
             name="speaker_accuracy_converted", threshold=0.)
 
+        self.feature_loss_tracker = tf.metrics.Mean(name="feature_loss")
+
         self.content_model = content_model
         self.content_model.trainable = False
         self.speaker_classification_model = speaker_classification_model
@@ -79,9 +81,26 @@ class ConversionModel(tf.keras.Model):
 
             # get the mask?? oh wey
             # we got two more strides of 2 in there so let's just do this LOL
+            audio_lengths_source = [audio_length]*2
             audio_length_discriminator = tf.cast(tf.math.ceil(audio_length / 2), tf.int32)
+            audio_lengths_source += [audio_length_discriminator]*2
             audio_length_discriminator = tf.cast(tf.math.ceil(audio_length_discriminator / 2), tf.int32)
+            audio_lengths_source += [audio_length_discriminator]*2
             discriminator_mask = tf.sequence_mask(audio_length_discriminator, dtype=tf.float32)[:, :, None]
+
+            discriminator_fake_output = self.speaker_classification_model(
+                [conversion_spectrogram, discriminator_mask], training=False)
+            discriminator_fake_logits = discriminator_fake_output[-1]
+            fake_target_labels = tf.ones(tf.shape(discriminator_fake_logits)[0])[:, None]
+
+            speaker_confusion = tf.reduce_mean(
+                tf.nn.sigmoid_cross_entropy_with_logits(
+                    labels=fake_target_labels, logits=discriminator_fake_logits))
+
+            # we can add feature matching. for that we have to
+            # - run fake audio through D (like above)
+            # - also run real audio through D (like below...)
+            # - for each layer compute differences between batch-averaged activations
 
             # also need mask for the target audio..............
             target_audio_length = tf.cast(
@@ -89,19 +108,31 @@ class ConversionModel(tf.keras.Model):
                     (tf.cast(target_audio_length,
                              tf.float32) + 1) / self.content_model.hop_length),
                 tf.int32)
-            for _ in range(3):
-                target_audio_length = tf.cast(tf.math.ceil(target_audio_length / 2), tf.int32)
-            discriminator_mask_target = tf.sequence_mask(target_audio_length, dtype=tf.float32)[:, :, None]
+            target_audio_length = tf.cast(
+                tf.math.ceil(target_audio_length / 2), tf.int32)
 
-            discriminator_fake_output = self.speaker_classification_model(
-                [conversion_spectrogram, discriminator_mask], training=False)
-            fake_target_labels = tf.ones(tf.shape(discriminator_fake_output)[0])[:, None]
+            audio_lengths_target = [target_audio_length]*2
+            audio_length_discriminator = tf.cast(tf.math.ceil(target_audio_length / 2), tf.int32)
+            audio_lengths_target += [audio_length_discriminator]*2
+            audio_length_discriminator = tf.cast(tf.math.ceil(target_audio_length / 2), tf.int32)
+            audio_lengths_target += [audio_length_discriminator]*2
+            discriminator_mask_target = tf.sequence_mask(target_audio_length,
+                                                         dtype=tf.float32)[:, :, None]
 
-            speaker_confusion = tf.reduce_mean(
-                tf.nn.sigmoid_cross_entropy_with_logits(
-                    labels=fake_target_labels, logits=discriminator_fake_output))
+            discriminator_real_features = self.speaker_classification_model(
+                [target_spectrogram, discriminator_mask_target], training=False)[:-1]
+            discriminator_fake_features = discriminator_fake_output[:-1]
 
-            loss = masked_mse + speaker_confusion
+            feature_loss = 0.
+            for ind, real_feature, fake_feature in enumerate(
+                    zip(discriminator_real_features, discriminator_fake_features)):
+                masked_real = real_feature * tf.sequence_mask(audio_lengths_target[ind], dtype=tf.float32)[:, :, None]
+                masked_fake = fake_feature * tf.sequence_mask(audio_lengths_source)
+                masked_real_avg = tf.reduce_mean(masked_real, axis=0)
+                masked_fake_avg = tf.reduce_mean(masked_fake, axis=0)
+                feature_loss += tf.norm(masked_fake_avg - masked_real_avg)
+
+            loss = masked_mse + speaker_confusion + feature_loss
 
         grads = conversion_tape.gradient(loss, conversion_variables)
         grads, global_norm = tf.clip_by_global_norm(
@@ -113,18 +144,18 @@ class ConversionModel(tf.keras.Model):
         # TODO spectral normalization in discriminator
         with tf.GradientTape() as classifier_tape:
             discriminator_fake_output = self.speaker_classification_model(
-                [conversion_spectrogram, discriminator_mask], training=True)
+                [conversion_spectrogram, discriminator_mask], training=True)[-1]
             fake_target_labels = tf.zeros(tf.shape(discriminator_fake_output)[0])[:, None]
             speaker_loss_converted = tf.reduce_mean(
                 tf.nn.sigmoid_cross_entropy_with_logits(
                     labels=fake_target_labels, logits=discriminator_fake_output))
 
             discriminator_real_output = self.speaker_classification_model(
-                [target_spectrogram, discriminator_mask_target], training=True)
-            real_target_labels = 0.9*tf.ones(tf.shape(discriminator_real_output)[0])[:, None]
+                [target_spectrogram, discriminator_mask_target], training=True)[-1]
+            real_target_labels = tf.ones(tf.shape(discriminator_real_output)[0])[:, None]
             speaker_loss_real = tf.reduce_mean(
                 tf.nn.sigmoid_cross_entropy_with_logits(
-                    labels=real_target_labels, logits=discriminator_real_output))
+                    labels=0.9*real_target_labels, logits=discriminator_real_output))
 
             speaker_loss_total = 0.5 * (speaker_loss_converted + speaker_loss_real)
 
@@ -143,12 +174,15 @@ class ConversionModel(tf.keras.Model):
         self.speaker_loss_converted_tracker.update_state(speaker_loss_converted)
         self.speaker_accuracy_converted_tracker(fake_target_labels, discriminator_fake_output)
 
+        self.feature_loss_tracker.update_state(feature_loss)
+
         return {"reconstruction_loss": self.loss_tracker.result(),
                 "speaker_confusion": self.speaker_confusion_tracker.result(),
                 "speaker_loss_real": self.speaker_loss_real_tracker.result(),
                 "speaker_accuracy_real": self.speaker_accuracy_real_tracker.result(),
                 "speaker_loss_converted": self.speaker_loss_converted_tracker.result(),
-                "speaker_accuracy_converted": self.speaker_accuracy_converted_tracker.result()}
+                "speaker_accuracy_converted": self.speaker_accuracy_converted_tracker.result(),
+                "feature_loss": self.feature_loss_tracker.result()}
 
     def test_step(self, data):
         # NOTE this only tests the content loss, not the speaker classification.
@@ -190,7 +224,8 @@ class ConversionModel(tf.keras.Model):
                 self.speaker_loss_real_tracker,
                 self.speaker_accuracy_real_tracker,
                 self.speaker_loss_converted_tracker,
-                self.speaker_accuracy_converted_tracker]
+                self.speaker_accuracy_converted_tracker,
+                self.feature_loss_tracker]
 
 
 def build_voice_conversion_model(config: DictConfig) -> tf.keras.Model:
@@ -268,15 +303,19 @@ def build_discriminator(config):
 
     x = tfkl.LayerNormalization(name="CLASSinput_batchnorm", scale=True)(logmel_input)
 
+    outputs = []
+
     for ind, (n_filters, width, stride) in enumerate(layer_params):
         layer_string = "_layer_" + str(ind)
         x = tfkl.Conv1D(n_filters, width, strides=stride, padding="same",
                         use_bias=False, name="CLASSconv" + layer_string)(x)
         x = tfkl.LayerNormalization(name="CLASSbn" + layer_string, scale=True)(x)
         x = tfkl.ReLU(name="CLASSactivation" + layer_string)(x)
+        outputs.append(x)
 
     pre_pool_mask = a_mask * x
     pooled = tfkl.GlobalAveragePooling1D(name="CLASSglobal_pool")(pre_pool_mask)
     logits = tfkl.Dense(1, use_bias=True, name="CLASSlogits")(pooled)
+    outputs.append(logits)
 
-    return tf.keras.Model(logmel_input, logits, name="speaker_classifier")
+    return tf.keras.Model([logmel_input, a_mask], outputs, name="speaker_classifier")
