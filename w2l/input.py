@@ -52,6 +52,15 @@ def w2l_dataset_npy(config: DictConfig,
     unique_speakers = sorted(set(speaker_ids))
     remap_ids = dict(zip(unique_speakers, range(len(unique_speakers))))
 
+    if keep_id > 0:
+        files = [f for f, id_ in zip(files, speaker_ids) if remap_ids[id_] == keep_id]
+        transcrs = [f for f, id_ in zip(transcrs, speaker_ids) if remap_ids[id_] == keep_id]
+        print("Keeping only speaker {}. Remaining data: {}".format(keep_id, len(files)))
+    elif keep_id < 0:
+        files = [f for f, id_ in zip(files, speaker_ids) if remap_ids[id_] != keep_id]
+        transcrs = [f for f, id_ in zip(transcrs, speaker_ids) if remap_ids[id_] != keep_id]
+        print("Removing speaker {}. Remaining data: {}".format(keep_id, len(files)))
+
     def _to_arrays(fname, trans):
         return load_arrays_map_transcriptions(
             fname, trans, vocab, remap_ids, normalize)
@@ -74,14 +83,6 @@ def w2l_dataset_npy(config: DictConfig,
         lambda file_id, transcription: tuple(tf.numpy_function(
             _to_arrays, [file_id, transcription], output_types)),
         num_parallel_calls=tf.data.AUTOTUNE)
-
-    # we either keep only the utterances of a certain speaker, or everything but
-    if keep_id > 0:
-        data = data.filter(lambda _aud, _len, _trans, _trlen, speaker_id: tf.math.equal(speaker_id, keep_id))
-    elif keep_id < 0:
-        data = data.filter(lambda _aud, _len, _trans, _trlen, speaker_id: tf.math.not_equal(speaker_id, -keep_id))
-    else:
-        pass
 
     # NOTE 1: padding value of 0 for element 1 and 3 is just a dummy (since
     #         sequence lengths are always scalar)
