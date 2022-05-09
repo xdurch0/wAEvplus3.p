@@ -57,6 +57,7 @@ def w2l_dataset_npy(config: DictConfig,
         transcrs = [f for f, id_ in zip(transcrs, speaker_ids) if remap_ids[id_] == keep_id]
         print("Keeping only speaker {}. Remaining data: {}".format(keep_id, len(files)))
     elif keep_id < 0:
+        keep_id *= -1
         files = [f for f, id_ in zip(files, speaker_ids) if remap_ids[id_] != keep_id]
         transcrs = [f for f, id_ in zip(transcrs, speaker_ids) if remap_ids[id_] != keep_id]
         print("Removing speaker {}. Remaining data: {}".format(keep_id, len(files)))
