@@ -124,12 +124,12 @@ class ConversionModel(tf.keras.Model):
             discriminator_fake_features = discriminator_fake_output[:-1]
 
             feature_loss = 0.
-            for ind, real_feature, fake_feature in enumerate(
+            for ind, (real_feature, fake_feature) in enumerate(
                     zip(discriminator_real_features, discriminator_fake_features)):
                 masked_real = real_feature * tf.sequence_mask(audio_lengths_target[ind], dtype=tf.float32)[:, :, None]
-                masked_fake = fake_feature * tf.sequence_mask(audio_lengths_source)
-                masked_real_avg = tf.reduce_mean(masked_real, axis=0)
-                masked_fake_avg = tf.reduce_mean(masked_fake, axis=0)
+                masked_fake = fake_feature * tf.sequence_mask(audio_lengths_source[ind], dtype=tf.float32)[:, :, None]
+                masked_real_avg = tf.reduce_mean(masked_real, axis=[0, 1])
+                masked_fake_avg = tf.reduce_mean(masked_fake, axis=[0, 1])
                 feature_loss += tf.norm(masked_fake_avg - masked_real_avg)
 
             loss = masked_mse + speaker_confusion + feature_loss
