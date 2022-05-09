@@ -20,7 +20,7 @@ class ConversionModel(tf.keras.Model):
             name="speaker_accuracy_real", threshold=0.)
 
         self.speaker_loss_converted_tracker = tf.metrics.Mean(name="speaker_loss_converted")
-        self.speaker_accuracy_converted_tracker = tf.metrics.BinarAccuracy(
+        self.speaker_accuracy_converted_tracker = tf.metrics.BinaryAccuracy(
             name="speaker_accuracy_converted", threshold=0.)
 
         self.content_model = content_model
@@ -77,7 +77,7 @@ class ConversionModel(tf.keras.Model):
             # train the generator part of GAN
             # for that we run the discriminator and try to confuse it (classify converted as REAL)
             discriminator_fake_output = self.speaker_classification_model(conversion_spectrogram, training=False)
-            fake_target_labels = tf.ones(tf.shape(discriminator_fake_output)[0])
+            fake_target_labels = tf.ones(tf.shape(discriminator_fake_output)[0])[:, None]
 
             speaker_confusion = tf.reduce_mean(
                 tf.nn.sigmoid_cross_entropy_with_logits(
@@ -96,14 +96,14 @@ class ConversionModel(tf.keras.Model):
         with tf.GradientTape() as classifier_tape:
             discriminator_fake_output = self.speaker_classification_model(
                 conversion_spectrogram, training=True)
-            fake_target_labels = tf.zeros(tf.shape(discriminator_fake_output)[0])
+            fake_target_labels = tf.zeros(tf.shape(discriminator_fake_output)[0])[:, None]
             speaker_loss_converted = tf.reduce_mean(
                 tf.nn.sigmoid_cross_entropy_with_logits(
                     labels=fake_target_labels, logits=discriminator_fake_output))
 
             discriminator_real_output = self.speaker_classification_model(target_spectrogram,
                                                                     training=True)
-            real_target_labels = tf.ones(tf.shape(discriminator_real_output)[0])
+            real_target_labels = tf.ones(tf.shape(discriminator_real_output)[0])[:, None]
             speaker_loss_real = tf.reduce_mean(
                 tf.nn.sigmoid_cross_entropy_with_logits(
                     labels=real_target_labels, logits=discriminator_real_output))

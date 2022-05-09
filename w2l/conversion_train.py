@@ -72,9 +72,9 @@ def train_conversion(config: DictConfig):
         learning_rate=lr_schedule)
 
     time_string = str(datetime.now())
-    tb_logdir = os.path.join(config.path.logs + "_conversion",
+    tb_logdir = os.path.join(config.path.logs + "_gan",
                              "run_" + time_string)
-    model_path = config.path.model + "_conversion_" + time_string + ".h5"
+    model_path = config.path.model + "_gan_" + time_string + ".h5"
     callback_tensorboard = tf.keras.callbacks.TensorBoard(
         histogram_freq=1, write_steps_per_second=True, update_freq=100,
         log_dir=tb_logdir, profile_batch=0)
