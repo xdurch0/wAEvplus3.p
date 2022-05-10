@@ -242,12 +242,12 @@ def build_voice_conversion_model(config: DictConfig) -> tf.keras.Model:
         x = tfkl.Conv2D(n_filters, width, strides=2, padding="same",
                         use_bias=False, name="conv_stride" + layer_string)(x)
         x = tfkl.BatchNormalization(name="bn1" + layer_string, scale=False)(x)
-        x = tfkl.ReLU(name="activation1" + layer_string)(x)
+        x = tfkl.LeakyReLU(alpha=.01, name="activation1" + layer_string)(x)
 
         x = tfkl.Conv2D(n_filters, width, strides=1, padding="same",
                         use_bias=False, name="conv2" + layer_string)(x)
         x = tfkl.BatchNormalization(name="bn2" + layer_string, scale=False)(x)
-        x = tfkl.ReLU(name="activation2" + layer_string)(x)
+        x = tfkl.LeakyReLU(alpha=.01, name="activation2" + layer_string)(x)
 
     decoder_params = [(128, 3, 1), (64, 3, 1), (32, 3, 1)]
     for ind, (n_filters, width, stride) in enumerate(decoder_params):
@@ -256,7 +256,7 @@ def build_voice_conversion_model(config: DictConfig) -> tf.keras.Model:
         x = tfkl.Conv2D(n_filters, width, strides=stride, padding="same",
                         use_bias=False, name="conv1" + layer_string)(x)
         x = tfkl.BatchNormalization(name="bn1" + layer_string, scale=False)(x)
-        x = tfkl.ReLU(name="activation1" + layer_string)(x)
+        x = tfkl.LeakyReLU(alpha=.01, name="activation1" + layer_string)(x)
 
         x = tfkl.UpSampling2D(2, name="upsample" + layer_string)(x)
         x = tfkl.Concatenate(name="concatenate" + layer_string)(
@@ -265,7 +265,7 @@ def build_voice_conversion_model(config: DictConfig) -> tf.keras.Model:
         x = tfkl.Conv2D(n_filters, width, strides=stride, padding="same",
                         use_bias=False, name="conv2" + layer_string)(x)
         x = tfkl.BatchNormalization(name="bn2" + layer_string, scale=False)(x)
-        x = tfkl.ReLU(name="activation2" + layer_string)(x)
+        x = tfkl.LeakyReLU(alpha=.01, name="activation2" + layer_string)(x)
 
     x = tfkl.UpSampling2D(2, name="upsample_decoder_final")(x)
     x = tfkl.Concatenate(name="concatenate_decoder_final")(
@@ -310,7 +310,7 @@ def build_discriminator(config):
         x = tfkl.Conv1D(n_filters, width, strides=stride, padding="same",
                         use_bias=False, name="CLASSconv" + layer_string)(x)
         x = tfkl.LayerNormalization(name="CLASSbn" + layer_string, scale=True)(x)
-        x = tfkl.ReLU(name="CLASSactivation" + layer_string)(x)
+        x = tfkl.LeakyReLU(alpha=.01, name="CLASSactivation" + layer_string)(x)
         outputs.append(x)
 
     pre_pool_mask = a_mask * x
