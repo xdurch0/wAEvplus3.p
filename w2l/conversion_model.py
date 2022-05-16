@@ -23,6 +23,12 @@ class ConversionModel(tf.keras.Model):
         self.topk_speaker_accuracy_real_tracker = tf.metrics.SparseTopKCategoricalAccuracy(
             5, name="top5_speaker_accuracy_real")
 
+        self.speaker_loss_converted_tracker = tf.metrics.Mean(name="speaker_loss_converted")
+        self.speaker_accuracy_converted_tracker = tf.metrics.SparseCategoricalAccuracy(
+            name="speaker_accuracy_converted")
+        self.topk_speaker_accuracy_converted_tracker = tf.metrics.SparseTopKCategoricalAccuracy(
+            5, name="top5_speaker_accuracy_converted")
+
         self.content_model = content_model
         self.content_model.trainable = False
         self.speaker_classification_model = speaker_classification_model
@@ -70,10 +76,13 @@ class ConversionModel(tf.keras.Model):
 
             masked_mse = tf.reduce_sum(mask * logits_squared_error) / tf.reduce_sum(mask)
 
+            classifier_audio_length = tf.cast(tf.math.ceil(audio_length / 2), tf.int32)
+            classifier_audio_length = tf.cast(tf.math.ceil(classifier_audio_length / 2), tf.int32)
+            classifier_mask = tf.sequence_mask(classifier_audio_length, dtype=tf.float32)[:, :, None]
             # conversion loss
             # alternative: try maximizing logits!
             speaker_logits_converted = self.speaker_classification_model(
-                reconstruction_spectrogram, training=False)
+                [reconstruction_spectrogram, classifier_mask], training=False)
             # target speaker ID is 1 -- arbitrary
             definitely_real_labels = tf.ones(tf.shape(speaker_logits_converted)[0], dtype=tf.int32)
             speaker_conversion_loss = tf.reduce_mean(
@@ -89,22 +98,19 @@ class ConversionModel(tf.keras.Model):
 
         # train speaker classifier
         with tf.GradientTape() as classifier_tape:
-            """
             speaker_logits_converted = self.speaker_classification_model(
-                reconstruction_spectrogram, training=True)
+                [reconstruction_spectrogram, classifier_mask], training=True)
             speaker_loss_converted = tf.reduce_mean(
                 tf.nn.sparse_softmax_cross_entropy_with_logits(
                     labels=speaker_id, logits=speaker_logits_converted))
-            """
 
-            speaker_logits_real = self.speaker_classification_model(audio_spectrogram,
+            speaker_logits_real = self.speaker_classification_model([audio_spectrogram, classifier_mask],
                                                                     training=True)
             speaker_loss_real = tf.reduce_mean(
                 tf.nn.sparse_softmax_cross_entropy_with_logits(
                     labels=speaker_id, logits=speaker_logits_real))
 
-            #speaker_loss_total = 0.5 * (speaker_loss_converted + speaker_loss_real)
-            speaker_loss_total = speaker_loss_real
+            speaker_loss_total = 0.5 * (speaker_loss_converted + speaker_loss_real)
 
         speaker_grads = classifier_tape.gradient(
             speaker_loss_total, self.speaker_classification_model.trainable_variables)
@@ -120,12 +126,19 @@ class ConversionModel(tf.keras.Model):
         self.speaker_accuracy_real_tracker(speaker_id, speaker_logits_real)
         self.topk_speaker_accuracy_real_tracker(speaker_id, speaker_logits_real)
 
+        self.speaker_loss_converted_tracker.update_state(speaker_loss_converted)
+        self.speaker_accuracy_converted_tracker(speaker_id, speaker_logits_converted)
+        self.topk_speaker_accuracy_converted_tracker(speaker_id, speaker_logits_converted)
+
         return {"reconstruction_loss": self.loss_tracker.result(),
                 "speaker_conversion_loss": self.speaker_confusion_tracker.result(),
                 "speaker_accuracy_confusion": self.speaker_accuracy_confusion_tracker.result(),
                 "speaker_loss_real": self.speaker_loss_real_tracker.result(),
                 "speaker_accuracy_real": self.speaker_accuracy_real_tracker.result(),
-                "speaker_top5_accuracy_real": self.topk_speaker_accuracy_real_tracker.result()}
+                "speaker_top5_accuracy_real": self.topk_speaker_accuracy_real_tracker.result(),
+                "speaker_loss_converted": self.speaker_loss_converted_tracker.result(),
+                "speaker_accuracy_converted": self.speaker_accuracy_converted_tracker.result(),
+                "speaker_top5_accuracy_converted": self.topk_speaker_accuracy_converted_tracker.result()}
 
     def test_step(self, data):
         # NOTE this only tests the content loss, not the speaker classification.
@@ -155,10 +168,14 @@ class ConversionModel(tf.keras.Model):
             masked_mse = tf.reduce_sum(
                 mask * logits_squared_error) / tf.reduce_sum(mask)
 
+            classifier_audio_length = tf.cast(tf.math.ceil(audio_length / 2), tf.int32)
+            classifier_audio_length = tf.cast(tf.math.ceil(classifier_audio_length / 2), tf.int32)
+            classifier_mask = tf.sequence_mask(classifier_audio_length, dtype=tf.float32)[:, :, None]
+
             # conversion loss
             # alternative: try maximizing logits!
             speaker_logits_converted = self.speaker_classification_model(
-                reconstruction_spectrogram, training=False)
+                [reconstruction_spectrogram, classifier_mask], training=False)
             # target speaker ID is 1 -- arbitrary
             definitely_real_labels = tf.ones(
                 tf.shape(speaker_logits_converted)[0], dtype=tf.int32)
@@ -181,7 +198,6 @@ class ConversionModel(tf.keras.Model):
         return [self.loss_tracker,
                 self.speaker_confusion_tracker,
                 self.speaker_accuracy_confusion_tracker,
-                self.topk_speaker_accuracy_confusion_tracker,
                 self.speaker_loss_real_tracker,
                 self.speaker_accuracy_real_tracker,
                 self.topk_speaker_accuracy_real_tracker,
@@ -260,6 +276,7 @@ def build_voice_conversion_model(config: DictConfig,
 def build_speaker_classifier(config, n_speakers):
     # XXX changed to accept logmel input directly
     logmel_input = tf.keras.Input((None, config.features.mel_freqs))
+    mask_input = tf.keras.Input((None, 1))
 
     layer_params = [(256, 48, 2)] + [(256, 7, 1), (256, 7, 2)] * 2 + [(1024, 1, 1)]
 
@@ -272,7 +289,7 @@ def build_speaker_classifier(config, n_speakers):
         x = tfkl.LayerNormalization(name="CLASSbn" + layer_string, scale=True)(x)
         x = tfkl.ReLU(name="CLASSactivation" + layer_string)(x)
 
-    pooled = tfkl.GlobalAveragePooling1D(name="CLASSglobal_pool")(x)
+    pooled = tfkl.GlobalAveragePooling1D(name="CLASSglobal_pool")(x*mask_input)
     logits = tfkl.Dense(n_speakers, use_bias=True, name="CLASSlogits")(pooled)
 
-    return tf.keras.Model(logmel_input, logits, name="speaker_classifier")
+    return tf.keras.Model([logmel_input, mask_input], logits, name="speaker_classifier")
