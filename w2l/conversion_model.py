@@ -30,6 +30,7 @@ class ConversionModel(tf.keras.Model):
             name="speaker_accuracy_converted")
         self.topk_speaker_accuracy_converted_tracker = tf.metrics.SparseTopKCategoricalAccuracy(
             5, name="top5_speaker_accuracy_converted")
+        self.power_diff_tracker = tf.metrics.Mean(name="power_diff")
 
         self.content_model = content_model
         self.content_model.trainable = False
@@ -89,9 +90,13 @@ class ConversionModel(tf.keras.Model):
             # to do this, use speaker_probabilities as label
             # along with non-sparse cross-entropy
 
-            # speaker classifiers has two more strides of 2
+            # speaker classifiers has 4 more strides of 2
             classifier_audio_length = tf.cast(tf.math.ceil(audio_length / 2),
                                               tf.int32)
+            classifier_audio_length = tf.cast(
+                tf.math.ceil(classifier_audio_length / 2), tf.int32)
+            classifier_audio_length = tf.cast(
+                tf.math.ceil(classifier_audio_length / 2), tf.int32)
             classifier_audio_length = tf.cast(
                 tf.math.ceil(classifier_audio_length / 2), tf.int32)
             classifier_mask = tf.sequence_mask(classifier_audio_length,
@@ -105,7 +110,22 @@ class ConversionModel(tf.keras.Model):
                 tf.nn.sparse_softmax_cross_entropy_with_logits(
                     labels=speaker_id, logits=speaker_logits_confusion))
 
-            loss = masked_mse - speaker_confusion
+            # regularize average energy or whatever
+            overall_power_converted = tf.reduce_mean(reconstruction_spectrogram,
+                                                     axis=-1, keepdims=True)
+            overall_power_original = tf.reduce_mean(
+                audio_spectrogram, axis=-1, keepdims=True)
+
+            converted_smoothed = tf.nn.avg_pool1d(
+                overall_power_converted, ksize=5, strides=1, padding="VALID")
+            original_smoothed = tf.nn.avg_pool1d(
+                overall_power_original, ksize=5, strides=1, padding="VALID")
+
+            power_diff = tf.math.squared_difference(
+                converted_smoothed, original_smoothed)
+            power_diff = tf.reduce_mean(power_diff)
+
+            loss = masked_mse - speaker_confusion + power_diff
 
         grads = conversion_tape.gradient(loss, conversion_variables)
         grads, global_norm = tf.clip_by_global_norm(
@@ -147,6 +167,8 @@ class ConversionModel(tf.keras.Model):
         self.speaker_accuracy_converted_tracker(speaker_id, speaker_logits_converted)
         self.topk_speaker_accuracy_converted_tracker(speaker_id, speaker_logits_converted)
 
+        self.power_diff_tracker(power_diff)
+
         return {"reconstruction_loss": self.loss_tracker.result(),
                 "speaker_confusion": self.speaker_confusion_tracker.result(),
                 "speaker_accuracy_confusion": self.speaker_accuracy_confusion_tracker.result(),
@@ -156,7 +178,8 @@ class ConversionModel(tf.keras.Model):
                 "speaker_top5_accuracy_real": self.topk_speaker_accuracy_real_tracker.result(),
                 "speaker_loss_converted": self.speaker_loss_converted_tracker.result(),
                 "speaker_accuracy_converted": self.speaker_accuracy_converted_tracker.result(),
-                "speaker_top5_accuracy_converted": self.topk_speaker_accuracy_converted_tracker.result()}
+                "speaker_top5_accuracy_converted": self.topk_speaker_accuracy_converted_tracker.result(),
+                "power_diff": self.power_diff_tracker.result()}
 
     def test_step(self, data):
         # NOTE this only tests the content loss, not the speaker classification.
@@ -202,7 +225,8 @@ class ConversionModel(tf.keras.Model):
                 self.topk_speaker_accuracy_real_tracker,
                 self.speaker_loss_converted_tracker,
                 self.speaker_accuracy_converted_tracker,
-                self.topk_speaker_accuracy_converted_tracker]
+                self.topk_speaker_accuracy_converted_tracker,
+                self.power_diff_tracker]
 
 
 def build_voice_conversion_model(config: DictConfig,
@@ -216,36 +240,72 @@ def build_voice_conversion_model(config: DictConfig,
     for ind, (n_filters, width, stride) in enumerate(encoder_params):
         layer_string = "_encoder_" + str(ind)
 
+        ye_olde = x
         encoder_outputs.append(x)
         x = tfkl.Conv2D(n_filters, width, strides=2, padding="same",
                         use_bias=False, name="conv_stride" + layer_string)(x)
         x = tfkl.BatchNormalization(name="bn1" + layer_string, scale=False)(x)
-        x = tfkl.ReLU(name="activation1" + layer_string)(x)
+        x = tfkl.LeakyReLU(0.01, name="activation1" + layer_string)(x)
 
         x = tfkl.Conv2D(n_filters, width, strides=1, padding="same",
                         use_bias=False, name="conv2" + layer_string)(x)
         x = tfkl.BatchNormalization(name="bn2" + layer_string, scale=False)(x)
-        x = tfkl.ReLU(name="activation2" + layer_string)(x)
+        x = tfkl.LeakyReLU(0.01, name="activation2" + layer_string)(x)
+
+        x = tfkl.Conv2D(n_filters, width, strides=1, padding="same",
+                        use_bias=False, name="conv3" + layer_string)(x)
+        x = tfkl.BatchNormalization(name="bn3" + layer_string, scale=False)(x)
+        x = tfkl.LeakyReLU(0.01, name="activation3" + layer_string)(x)
+
+        x = tfkl.Conv2D(n_filters, width, strides=1, padding="same",
+                        use_bias=False, name="conv4" + layer_string)(x)
+        x = tfkl.BatchNormalization(name="bn4" + layer_string, scale=False)(x)
+
+        ye_olde_project = tfkl.Conv2D(n_filters, 1, strides=2,
+                                      name="conv_project" + layer_string)(ye_olde)
+        x = x + ye_olde_project
+
+        x = tfkl.LeakyReLU(0.01, name="activation4" + layer_string)(x)
 
     decoder_params = [(128, 3, 1), (64, 3, 1), (32, 3, 1)]
     for ind, (n_filters, width, stride) in enumerate(decoder_params):
         layer_string = "_decoder_" + str(ind)
 
+        ye_olde = x
+
         x = tfkl.Conv2D(n_filters, width, strides=stride, padding="same",
                         use_bias=False, name="conv1" + layer_string)(x)
         x = tfkl.BatchNormalization(name="bn1" + layer_string, scale=False)(x)
-        x = tfkl.ReLU(name="activation1" + layer_string)(x)
-
-        x = tfkl.UpSampling2D(2, name="upsample" + layer_string)(x)
-        x = tfkl.Concatenate(name="concatenate" + layer_string)(
-            [x, encoder_outputs[-(ind + 1)]])
+        x = tfkl.LeakyReLU(0.01, name="activation1" + layer_string)(x)
 
         x = tfkl.Conv2D(n_filters, width, strides=stride, padding="same",
                         use_bias=False, name="conv2" + layer_string)(x)
         x = tfkl.BatchNormalization(name="bn2" + layer_string, scale=False)(x)
-        x = tfkl.ReLU(name="activation2" + layer_string)(x)
+        x = tfkl.LeakyReLU(0.01, name="activation2" + layer_string)(x)
 
-    x = tfkl.UpSampling2D(2, name="upsample_decoder_final")(x)
+        x = tfkl.Conv2D(n_filters, width, strides=stride, padding="same",
+                        use_bias=False, name="conv3" + layer_string)(x)
+        x = tfkl.BatchNormalization(name="bn3" + layer_string, scale=False)(x)
+        x = tfkl.LeakyReLU(0.01, name="activation3" + layer_string)(x)
+
+        x = tfkl.UpSampling2D(2, interpolation="bilinear",
+                              name="upsample" + layer_string)(x)
+        x = tfkl.Concatenate(name="concatenate" + layer_string)(
+            [x, encoder_outputs[-(ind + 1)]])
+
+        x = tfkl.Conv2D(n_filters, width, strides=stride, padding="same",
+                        use_bias=False, name="conv4" + layer_string)(x)
+        x = tfkl.BatchNormalization(name="bn4" + layer_string, scale=False)(x)
+        x = tfkl.LeakyReLU(0.01, name="activation4" + layer_string)(x)
+
+        ye_olde_project = tfkl.UpSampling2D(2, interpolation="bilinear",
+                                            name="project_up" + layer_string)(ye_olde)
+        ye_olde_project = tfkl.Conv2D(n_filters, 1, name="project_conv" + layer_string)(ye_olde_project)
+
+        x = x + ye_olde_project
+
+    x = tfkl.UpSampling2D(2, interpolation="bilinear",
+                          name="upsample_decoder_final")(x)
     x = tfkl.Concatenate(name="concatenate_decoder_final")(
         [x, encoder_outputs[0]])
     reconstructed = tfkl.Conv2D(1, 1, name="conv_decoder_final")(x)
@@ -280,7 +340,7 @@ def build_speaker_classifier(config, n_speakers):
     logmel_input = tf.keras.Input((None, config.features.mel_freqs))
     mask_input = tf.keras.Input((None, 1))
 
-    layer_params = [(256, 48, 2)] + [(256, 7, 1), (256, 7, 2)] * 2 + [(1024, 1, 1)]
+    layer_params = [(256, 48, 2)] + [(256, 7, 1), (256, 7, 2)] * 4 + [(1024, 1, 1)]
 
     x = tfkl.LayerNormalization(name="CLASSinput_batchnorm", scale=True)(logmel_input)
 
@@ -289,7 +349,7 @@ def build_speaker_classifier(config, n_speakers):
         x = tfkl.Conv1D(n_filters, width, strides=stride, padding="same",
                         use_bias=False, name="CLASSconv" + layer_string)(x)
         x = tfkl.LayerNormalization(name="CLASSbn" + layer_string, scale=True)(x)
-        x = tfkl.ReLU(name="CLASSactivation" + layer_string)(x)
+        x = tfkl.LeakyReLU(0.01, name="CLASSactivation" + layer_string)(x)
 
     pooled = tfkl.GlobalAveragePooling1D(name="CLASSglobal_pool")(x * mask_input)
     logits = tfkl.Dense(n_speakers, use_bias=True, name="CLASSlogits")(pooled)
