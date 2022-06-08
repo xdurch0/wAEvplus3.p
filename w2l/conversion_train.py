@@ -69,7 +69,7 @@ def train_conversion(config: DictConfig):
         histogram_freq=1, write_steps_per_second=True, update_freq=100,
         log_dir=tb_logdir, profile_batch=0)
     callback_stop = tf.keras.callbacks.EarlyStopping(
-        patience=60000 // config.training.steps_per_epoch, verbose=1)
+        patience=200000 // config.training.steps_per_epoch, verbose=1)
     callback_checkpoint = tf.keras.callbacks.ModelCheckpoint(
         model_path, save_best_only=False, save_weights_only=True,
         verbose=1)

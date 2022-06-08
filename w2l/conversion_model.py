@@ -74,7 +74,7 @@ class ConversionModel(tf.keras.Model):
             mask = tf.sequence_mask(audio_length, dtype=tf.float32)[:, :, None]
 
             masked_mse = 0
-            for target_act, recon_act in zip(logits_target, logits_recon):
+            for target_act, recon_act in zip(logits_target[:1], logits_recon[:1]):
                 logits_squared_error = tf.math.squared_difference(target_act,
                                                                   recon_act)
 
@@ -88,8 +88,18 @@ class ConversionModel(tf.keras.Model):
             # so use negative entropy as loss!
             # to do this, use speaker_probabilities as label
             # along with non-sparse cross-entropy
+
+            # speaker classifiers has two more strides of 2
+            classifier_audio_length = tf.cast(tf.math.ceil(audio_length / 2),
+                                              tf.int32)
+            classifier_audio_length = tf.cast(
+                tf.math.ceil(classifier_audio_length / 2), tf.int32)
+            classifier_mask = tf.sequence_mask(classifier_audio_length,
+                                               dtype=tf.float32)[:, :, None]
+
+
             speaker_logits_confusion = self.speaker_classification_model(
-                reconstruction_spectrogram, training=False)
+                [reconstruction_spectrogram, classifier_mask], training=False)
             #speaker_probabilities = tf.nn.softmax(speaker_logits_confusion)
             speaker_confusion = tf.reduce_mean(
                 tf.nn.sparse_softmax_cross_entropy_with_logits(
@@ -105,13 +115,13 @@ class ConversionModel(tf.keras.Model):
         # train speaker classifier
         with tf.GradientTape() as classifier_tape:
             speaker_logits_converted = self.speaker_classification_model(
-                reconstruction_spectrogram, training=True)
+                [reconstruction_spectrogram, classifier_mask], training=True)
             speaker_loss_converted = tf.reduce_mean(
                 tf.nn.sparse_softmax_cross_entropy_with_logits(
                     labels=speaker_id, logits=speaker_logits_converted))
 
-            speaker_logits_real = self.speaker_classification_model(audio_spectrogram,
-                                                                    training=True)
+            speaker_logits_real = self.speaker_classification_model(
+                [audio_spectrogram, classifier_mask], training=True)
             speaker_loss_real = tf.reduce_mean(
                 tf.nn.sparse_softmax_cross_entropy_with_logits(
                     labels=speaker_id, logits=speaker_logits_real))
@@ -154,30 +164,29 @@ class ConversionModel(tf.keras.Model):
         audio, audio_length, _, _, _ = data
         audio_spectrogram = self.logmel(audio)
 
-        with tf.GradientTape() as tape:
-            reconstruction_spectrogram = self(audio_spectrogram, training=False)
+        reconstruction_spectrogram = self(audio_spectrogram, training=False)
 
-            logits_target = self.content_model(audio_spectrogram, training=False)
-            logits_recon = self.content_model(reconstruction_spectrogram, training=False)
+        logits_target = self.content_model(audio_spectrogram, training=False)
+        logits_recon = self.content_model(reconstruction_spectrogram, training=False)
 
-            # take into account mel transformation
-            audio_length = tf.cast(
-                tf.math.ceil(
-                    (tf.cast(audio_length,
-                             tf.float32) + 1) / self.content_model.hop_length),
-                tf.int32)
-            # take into account stride of the model
-            audio_length = tf.cast(tf.math.ceil(audio_length / 2), tf.int32)
-            mask = tf.sequence_mask(audio_length, dtype=tf.float32)[:, :, None]
+        # take into account mel transformation
+        audio_length = tf.cast(
+            tf.math.ceil(
+                (tf.cast(audio_length,
+                         tf.float32) + 1) / self.content_model.hop_length),
+            tf.int32)
+        # take into account stride of the model
+        audio_length = tf.cast(tf.math.ceil(audio_length / 2), tf.int32)
+        mask = tf.sequence_mask(audio_length, dtype=tf.float32)[:, :, None]
 
-            masked_mse = 0
-            for target_act, recon_act in zip(logits_target, logits_recon):
-                logits_squared_error = tf.math.squared_difference(target_act,
-                                                                  recon_act)
+        masked_mse = 0
+        for target_act, recon_act in zip(logits_target[:1], logits_recon[:1]):
+            logits_squared_error = tf.math.squared_difference(target_act,
+                                                              recon_act)
 
-                masked_mse += tf.reduce_sum(
-                    mask * logits_squared_error) / tf.reduce_sum(mask)
-            loss = masked_mse
+            masked_mse += tf.reduce_sum(
+                mask * logits_squared_error) / tf.reduce_sum(mask)
+        loss = masked_mse
 
         self.loss_tracker.update_state(loss)
         return {"loss": self.loss_tracker.result()}
@@ -269,6 +278,7 @@ def build_voice_conversion_model(config: DictConfig,
 def build_speaker_classifier(config, n_speakers):
     # XXX changed to accept logmel input directly
     logmel_input = tf.keras.Input((None, config.features.mel_freqs))
+    mask_input = tf.keras.Input((None, 1))
 
     layer_params = [(256, 48, 2)] + [(256, 7, 1), (256, 7, 2)] * 2 + [(1024, 1, 1)]
 
@@ -281,7 +291,7 @@ def build_speaker_classifier(config, n_speakers):
         x = tfkl.LayerNormalization(name="CLASSbn" + layer_string, scale=True)(x)
         x = tfkl.ReLU(name="CLASSactivation" + layer_string)(x)
 
-    pooled = tfkl.GlobalAveragePooling1D(name="CLASSglobal_pool")(x)
+    pooled = tfkl.GlobalAveragePooling1D(name="CLASSglobal_pool")(x * mask_input)
     logits = tfkl.Dense(n_speakers, use_bias=True, name="CLASSlogits")(pooled)
 
-    return tf.keras.Model(logmel_input, logits, name="speaker_classifier")
+    return tf.keras.Model([logmel_input, mask_input], logits, name="speaker_classifier")
