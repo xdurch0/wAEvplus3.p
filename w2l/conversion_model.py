@@ -104,7 +104,7 @@ class ConversionModel(tf.keras.Model):
 
 
             speaker_logits_confusion = self.speaker_classification_model(
-                [reconstruction_spectrogram, classifier_mask], training=False)
+                [reconstruction_spectrogram, classifier_mask], training=True)
             #speaker_probabilities = tf.nn.softmax(speaker_logits_confusion)
             speaker_confusion = tf.reduce_mean(
                 tf.nn.sparse_softmax_cross_entropy_with_logits(
@@ -343,17 +343,17 @@ def build_speaker_classifier(config, n_speakers):
     layer_params = [(256, 48, 2)] + [(256, 7, 1), (256, 7, 2)] * 4 + [(1024, 1, 1)]
     residual_after = [2, 4, 6, 8]
 
-    x = tfkl.LayerNormalization(name="CLASSinput_batchnorm", scale=True)(logmel_input)
+    x = tfkl.BatchNormalization(name="CLASSinput_batchnorm", scale=True)(logmel_input)
 
     for ind, (n_filters, width, stride) in enumerate(layer_params):
         layer_string = "_layer_" + str(ind)
         x = tfkl.Conv1D(n_filters, width, strides=stride, padding="same",
                         use_bias=False, name="CLASSconv" + layer_string)(x)
-        x = tfkl.LayerNormalization(name="CLASSbn" + layer_string, scale=True)(x)
+        x = tfkl.BatchNormalization(name="CLASSbn" + layer_string, scale=True)(x)
 
         if ind in residual_after:
             ye_olde_project = tfkl.Conv1D(n_filters, 1, strides=2,
-                                          name="conv_project" + layer_string)(ye_olde)
+                                          name="CLASSconv_project" + layer_string)(ye_olde)
             x = x + ye_olde_project
 
         x = tfkl.LeakyReLU(0.01, name="CLASSactivation" + layer_string)(x)
