@@ -53,13 +53,15 @@ def train_conversion(config: DictConfig):
         decay_steps=(config.training.epochs - config.training.warmup_epochs)*config.training.steps_per_epoch)
     optimizer = tfa.optimizers.AdamW(
         weight_decay=wd_schedule,
-        learning_rate=lr_schedule)
+        learning_rate=lr_schedule,
+        beta_1=0.5)
 
     conversion_model.compile(optimizer=optimizer, run_eagerly=True)
     # TODO kinda bad to put that herew
     conversion_model.speaker_optimizer = tfa.optimizers.AdamW(
         weight_decay=wd_schedule,
-        learning_rate=lr_schedule)
+        learning_rate=lr_schedule,
+        beta_1=0.5)
 
     time_string = str(datetime.now())
     tb_logdir = os.path.join(config.path.logs + "_conversion",

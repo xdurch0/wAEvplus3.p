@@ -341,6 +341,7 @@ def build_speaker_classifier(config, n_speakers):
     mask_input = tf.keras.Input((None, 1))
 
     layer_params = [(256, 48, 2)] + [(256, 7, 1), (256, 7, 2)] * 4 + [(1024, 1, 1)]
+    residual_after = [2, 4, 6, 8]
 
     x = tfkl.LayerNormalization(name="CLASSinput_batchnorm", scale=True)(logmel_input)
 
@@ -349,7 +350,16 @@ def build_speaker_classifier(config, n_speakers):
         x = tfkl.Conv1D(n_filters, width, strides=stride, padding="same",
                         use_bias=False, name="CLASSconv" + layer_string)(x)
         x = tfkl.LayerNormalization(name="CLASSbn" + layer_string, scale=True)(x)
+
+        if ind in residual_after:
+            ye_olde_project = tfkl.Conv1D(n_filters, 1, strides=2,
+                                          name="conv_project" + layer_string)(ye_olde)
+            x = x + ye_olde_project
+
         x = tfkl.LeakyReLU(0.01, name="CLASSactivation" + layer_string)(x)
+
+        if ind == 0 or ind in residual_after:
+            ye_olde = x
 
     pooled = tfkl.GlobalAveragePooling1D(name="CLASSglobal_pool")(x * mask_input)
     logits = tfkl.Dense(n_speakers, use_bias=True, name="CLASSlogits")(pooled)
